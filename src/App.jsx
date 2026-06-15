@@ -454,6 +454,50 @@ function PDVLogin({ onBack, onEnter }) {
   );
 }
 
+/* ============================ Cadastro de entregador ============================ */
+function CourierSignup({ onBack }) {
+  const [f, setF] = useState({ name: "", phone: "", vehicleType: "Moto", email: "" });
+  const [done, setDone] = useState(false);
+  const [erro, setErro] = useState("");
+  const enviar = async () => {
+    if (!f.name || !f.phone) { setErro("Informe nome e telefone"); return; }
+    setErro("");
+    const { error } = await supabase.from("couriers").insert({ id: crypto.randomUUID(), storeId: STORE_ID, name: f.name, phone: f.phone, email: f.email || null, vehicleType: f.vehicleType, active: false, updatedAt: new Date().toISOString() });
+    if (error) { setErro(error.message); return; }
+    setDone(true);
+  };
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: NAVY }}>
+      <Card className="w-full max-w-sm p-6">
+        <div className="flex items-center gap-2 mb-3"><ZipIcon size={30} /><span className="font-bold" style={{ color: NAVY, fontFamily: "Fredoka, sans-serif" }}>Zipão Entregador</span></div>
+        {done ? (
+          <div className="text-center py-6">
+            <div className="h-12 w-12 rounded-full flex items-center justify-center mx-auto mb-3" style={{ background: SOFT }}><Check size={24} color={ORANGE} /></div>
+            <h3 className="font-bold" style={{ color: NAVY }}>Cadastro enviado!</h3>
+            <p className="text-sm mt-1" style={{ color: "#6B7280" }}>Seu acesso será liberado assim que o dono autorizar o seu cadastro.</p>
+            <Btn variant="ghost" className="w-full mt-4" onClick={onBack}>Voltar</Btn>
+          </div>
+        ) : (
+          <>
+            <p className="text-sm mb-4" style={{ color: "#6B7280" }}>Cadastre-se para fazer entregas. O dono precisa aprovar antes de você ficar ativo.</p>
+            <label className="text-sm font-medium" style={{ color: NAVY }}>Nome completo</label>
+            <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            <div className="grid grid-cols-2 gap-2">
+              <div><label className="text-sm font-medium" style={{ color: NAVY }}>Telefone</label><input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /></div>
+              <div><label className="text-sm font-medium" style={{ color: NAVY }}>Veículo</label><select value={f.vehicleType} onChange={(e) => setF({ ...f, vehicleType: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm bg-white outline-none" style={{ borderColor: "#E2E2E2" }}>{["Moto", "Carro", "Bicicleta"].map((v) => <option key={v}>{v}</option>)}</select></div>
+            </div>
+            <label className="text-sm font-medium" style={{ color: NAVY }}>E-mail</label>
+            <input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} type="email" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            {erro && <p className="text-sm mb-2" style={{ color: "#C0392B" }}>{erro}</p>}
+            <Btn className="w-full mt-1" icon={Bike} onClick={enviar}>Enviar cadastro</Btn>
+            <button onClick={onBack} className="w-full mt-3 text-sm font-semibold" style={{ color: "#6B7280" }}>Voltar</button>
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 /* ============================ Login (hub) ============================ */
 function Login({ onEnter, onDono }) {
   const [role, setRole] = useState(null);
@@ -471,8 +515,10 @@ function Login({ onEnter, onDono }) {
   const roles = [
     { k: "dono", label: "Dono / Gestor", desc: "Painel completo do ERP", icon: ShieldCheck },
     { k: "pdv", label: "Atendente (PDV)", desc: "Frente de caixa e comandas", icon: ShoppingCart },
+    { k: "entregador", label: "Entregador", desc: "Cadastro e entregas", icon: Bike },
     { k: "cliente", label: "Cliente", desc: "Pedir e ver meus Zips", icon: Users },
   ];
+  const irPara = (k) => k === "dono" ? setRole("dono") : onEnter(k === "pdv" ? "pdvlogin" : k === "entregador" ? "cadentregador" : "cliente");
   return (
     <div className="min-h-screen w-full flex" style={{ background: CREAM }}>
       <div className="hidden md:flex flex-col justify-between p-12 w-1/2" style={{ background: NAVY }}>
@@ -493,7 +539,7 @@ function Login({ onEnter, onDono }) {
               <p className="text-sm mb-4" style={{ color: "#6B7280" }}>Escolha seu tipo de acesso.</p>
               <div className="space-y-2">
                 {roles.map((r) => (
-                  <button key={r.k} onClick={() => r.k === "dono" ? setRole("dono") : onEnter(r.k === "pdv" ? "pdvlogin" : "cliente")} className="w-full flex items-center gap-3 p-3 rounded-xl border text-left bg-white" style={{ borderColor: "#E2E2E2" }}>
+                  <button key={r.k} onClick={() => irPara(r.k)} className="w-full flex items-center gap-3 p-3 rounded-xl border text-left bg-white" style={{ borderColor: "#E2E2E2" }}>
                     <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: SOFT }}><r.icon size={18} color={ORANGE} /></div>
                     <div><div className="font-semibold text-sm" style={{ color: NAVY }}>{r.label}</div><div className="text-xs" style={{ color: "#9AA0A6" }}>{r.desc}</div></div>
                     <ChevronRight size={16} className="ml-auto" color="#9AA0A6" />
@@ -1057,29 +1103,90 @@ function Fiscal({ toast }) {
   );
 }
 
-function Encomendas() {
-  const tone = (s) => s.includes("Aguardando") ? "red" : s.includes("Pronto") ? "green" : s.includes("Confirmado") ? "blue" : "orange";
+function Encomendas({ toast }) {
+  const STATUS = ["Aguardando pagamento", "Confirmado", "Em produção", "Pronto p/ retirada", "Entregue"];
+  const tone = (s) => s.includes("Aguardando") ? "red" : s.includes("Pronto") ? "green" : s.includes("Confirmado") ? "blue" : s.includes("Entregue") ? "navy" : "orange";
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState(null);
+  const load = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.from("encomendas").select("*").eq("storeId", STORE_ID).order("quando");
+    if (error) toast("Erro: " + error.message); else setList(data || []);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+  const salvar = async () => {
+    if (!form.cliente || !form.item) return toast("Preencha cliente e item");
+    const payload = { cliente: form.cliente, item: form.item, valor: Number(form.valor) || 0, status: form.status, quando: form.quando ? new Date(form.quando).toISOString() : null };
+    let error;
+    if (form.id) ({ error } = await supabase.from("encomendas").update(payload).eq("id", form.id));
+    else ({ error } = await supabase.from("encomendas").insert({ ...payload, storeId: STORE_ID }));
+    if (error) return toast("Erro: " + error.message);
+    toast(form.id ? "Encomenda atualizada" : "Encomenda criada"); setForm(null); load();
+  };
+  const excluir = async (e) => { if (!window.confirm("Excluir encomenda de " + e.cliente + "?")) return; const { error } = await supabase.from("encomendas").delete().eq("id", e.id); if (error) return toast("Erro: " + error.message); toast("Excluída"); load(); };
+  const fmt = (s) => s ? new Date(s).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
   return (
-    <Section title="Gestão de encomendas" desc="Pedidos agendados com data, hora e acompanhamento de produção." right={<Btn icon={Plus}>Nova encomenda</Btn>}>
-      <div className="grid md:grid-cols-2 gap-4">
-        {ENCOMENDAS.map((e) => (
-          <Card key={e.c + e.item} className="p-5">
-            <div className="flex items-start justify-between"><div><div className="font-semibold" style={{ color: NAVY }}>{e.item}</div><div className="text-sm mt-1" style={{ color: "#6B7280" }}>{e.c}</div></div><Pill tone={tone(e.status)}>{e.status}</Pill></div>
-            <div className="flex items-center justify-between mt-4 pt-4 border-t" style={{ borderColor: "#F0F0F0" }}>
-              <div className="flex items-center gap-2 text-sm" style={{ color: "#4B5563" }}><Calendar size={15} />{e.data}</div>
-              <div className="font-bold" style={{ color: ORANGE }}>{money(e.valor)}</div>
+    <Section title="Gestão de encomendas" desc="Pedidos agendados, gravados no banco." right={<Btn icon={Plus} onClick={() => setForm({ cliente: "", item: "", valor: "", status: STATUS[0], quando: "" })}>Nova encomenda</Btn>}>
+      {loading ? <p className="text-sm" style={{ color: "#9AA0A6" }}>Carregando...</p> : list.length === 0 ? <p className="text-sm" style={{ color: "#9AA0A6" }}>Nenhuma encomenda. Clique em "Nova encomenda".</p> : (
+        <div className="grid md:grid-cols-2 gap-4">
+          {list.map((e) => (
+            <Card key={e.id} className="p-5">
+              <div className="flex items-start justify-between"><div><div className="font-semibold" style={{ color: NAVY }}>{e.item}</div><div className="text-sm mt-1" style={{ color: "#6B7280" }}>{e.cliente}</div></div><Pill tone={tone(e.status)}>{e.status}</Pill></div>
+              <div className="flex items-center justify-between mt-4 pt-4 border-t" style={{ borderColor: "#F0F0F0" }}>
+                <div className="flex items-center gap-2 text-sm" style={{ color: "#4B5563" }}><Calendar size={15} />{fmt(e.quando)}</div>
+                <div className="font-bold" style={{ color: ORANGE }}>{money(Number(e.valor))}</div>
+              </div>
+              <div className="flex gap-3 mt-3">
+                <button onClick={() => setForm({ id: e.id, cliente: e.cliente, item: e.item, valor: String(e.valor), status: e.status, quando: e.quando ? e.quando.slice(0, 16) : "" })} className="text-sm font-semibold" style={{ color: NAVY }}>Editar</button>
+                <button onClick={() => excluir(e)} className="text-sm font-semibold" style={{ color: "#C0392B" }}>Excluir</button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+      {form && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(26,33,54,.55)" }}>
+          <Card className="w-full max-w-sm p-6">
+            <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>{form.id ? "Editar encomenda" : "Nova encomenda"}</h3><button onClick={() => setForm(null)}><X size={20} color="#9AA0A6" /></button></div>
+            <label className="text-sm font-medium" style={{ color: NAVY }}>Cliente</label>
+            <input value={form.cliente} onChange={(e) => setForm({ ...form, cliente: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            <label className="text-sm font-medium" style={{ color: NAVY }}>Item</label>
+            <input value={form.item} onChange={(e) => setForm({ ...form, item: e.target.value })} placeholder="Ex.: Bolo 2kg chocolate" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="text-sm font-medium" style={{ color: NAVY }}>Valor (R$)</label><input value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} type="number" step="0.01" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /></div>
+              <div><label className="text-sm font-medium" style={{ color: NAVY }}>Quando</label><input value={form.quando} onChange={(e) => setForm({ ...form, quando: e.target.value })} type="datetime-local" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /></div>
             </div>
+            <label className="text-sm font-medium" style={{ color: NAVY }}>Status</label>
+            <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm bg-white outline-none" style={{ borderColor: "#E2E2E2" }}>{STATUS.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            <Btn className="w-full mt-1" icon={Check} onClick={salvar}>{form.id ? "Salvar" : "Criar encomenda"}</Btn>
           </Card>
-        ))}
-      </div>
+        </div>
+      )}
     </Section>
   );
 }
 
-function Delivery() {
+function Delivery({ toast }) {
   const tone = (s) => s.includes("caminho") ? "orange" : s.includes("Saiu") ? "blue" : "gray";
+  const [couriers, setCouriers] = useState([]);
+  const [form, setForm] = useState(null);
+  const load = async () => {
+    const { data, error } = await supabase.from("couriers").select("*").eq("storeId", STORE_ID).order("createdAt", { ascending: false });
+    if (error) toast("Erro: " + error.message); else setCouriers(data || []);
+  };
+  useEffect(() => { load(); }, []);
+  const aprovar = async (c, v) => { setCouriers((l) => l.map((x) => x.id === c.id ? { ...x, active: v } : x)); const { error } = await supabase.from("couriers").update({ active: v, updatedAt: new Date().toISOString() }).eq("id", c.id); if (error) { toast("Erro: " + error.message); load(); } else toast(v ? "Entregador autorizado" : "Acesso suspenso"); };
+  const salvar = async () => {
+    if (!form.name || !form.phone) return toast("Informe nome e telefone");
+    const { error } = await supabase.from("couriers").insert({ id: crypto.randomUUID(), storeId: STORE_ID, name: form.name, phone: form.phone, email: form.email || null, vehicleType: form.vehicleType || null, active: true, updatedAt: new Date().toISOString() });
+    if (error) return toast("Erro: " + error.message);
+    toast("Entregador cadastrado e ativo"); setForm(null); load();
+  };
+  const excluir = async (c) => { if (!window.confirm("Excluir " + c.name + "?")) return; const { error } = await supabase.from("couriers").delete().eq("id", c.id); if (error) return toast("Erro: " + error.message); toast("Removido"); load(); };
   return (
-    <Section title="Delivery" desc="Pedidos em rota, entregadores e tempo estimado — no estilo dos grandes apps.">
+    <Section title="Delivery" desc="Pedidos em rota e gestão de entregadores (você autoriza quem fica ativo).">
       <div className="grid lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-3">
           {DELIVERIES.map((d) => (
@@ -1093,13 +1200,38 @@ function Delivery() {
           ))}
         </div>
         <Card className="p-5">
-          <h3 className="font-bold mb-3" style={{ color: NAVY }}>Entregadores ativos</h3>
-          {[["Carlos", "Em rota"], ["Bruno", "Em rota"], ["Diego", "Disponível"]].map((m) => (
-            <div key={m[0]} className="flex items-center justify-between py-2"><span className="text-sm" style={{ color: NAVY }}>{m[0]}</span><Pill tone={m[1] === "Disponível" ? "green" : "orange"}>{m[1]}</Pill></div>
+          <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>Entregadores</h3><Btn variant="ghost" size="sm" icon={Plus} onClick={() => setForm({ name: "", phone: "", email: "", vehicleType: "Moto" })}>Cadastrar</Btn></div>
+          {couriers.length === 0 && <p className="text-sm" style={{ color: "#9AA0A6" }}>Nenhum entregador. Eles podem se cadastrar pela tela de entrada e aparecem aqui pra você autorizar.</p>}
+          {couriers.map((c) => (
+            <div key={c.id} className="flex items-center justify-between py-2 border-b" style={{ borderColor: "#F2F2F2" }}>
+              <div><div className="text-sm font-medium" style={{ color: NAVY }}>{c.name}</div><div className="text-xs" style={{ color: "#9AA0A6" }}>{c.phone}{c.vehicleType ? " · " + c.vehicleType : ""}</div></div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs" style={{ color: c.active ? "#1B7F4B" : "#C0392B" }}>{c.active ? "Ativo" : "Pendente"}</span>
+                <Toggle on={c.active} onChange={(v) => aprovar(c, v)} />
+                <button onClick={() => excluir(c)} style={{ color: "#C0392B" }}><X size={14} /></button>
+              </div>
+            </div>
           ))}
-          <Btn variant="ghost" size="sm" icon={Plus} className="w-full mt-3">Cadastrar entregador</Btn>
         </Card>
       </div>
+      {form && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(26,33,54,.55)" }}>
+          <Card className="w-full max-w-sm p-6">
+            <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>Cadastrar entregador</h3><button onClick={() => setForm(null)}><X size={20} color="#9AA0A6" /></button></div>
+            <label className="text-sm font-medium" style={{ color: NAVY }}>Nome</label>
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="text-sm font-medium" style={{ color: NAVY }}>Telefone</label><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /></div>
+              <div><label className="text-sm font-medium" style={{ color: NAVY }}>Veículo</label>
+                <select value={form.vehicleType} onChange={(e) => setForm({ ...form, vehicleType: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm bg-white outline-none" style={{ borderColor: "#E2E2E2" }}>{["Moto", "Carro", "Bicicleta"].map((v) => <option key={v}>{v}</option>)}</select>
+              </div>
+            </div>
+            <label className="text-sm font-medium" style={{ color: NAVY }}>E-mail (opcional)</label>
+            <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            <Btn className="w-full mt-1" icon={Check} onClick={salvar}>Cadastrar e ativar</Btn>
+          </Card>
+        </div>
+      )}
     </Section>
   );
 }
@@ -1122,18 +1254,23 @@ function Clientes({ toast }) {
     const { error } = await supabase.from("customers").update({ cashbackEnabled: v }).eq("id", c.id);
     if (error) { toast("Erro: " + error.message); load(); }
   };
+  const buscarCep = async (cep) => {
+    const c = (cep || "").replace(/\D/g, "");
+    if (c.length !== 8) return;
+    try {
+      const r = await fetch("https://viacep.com.br/ws/" + c + "/json/");
+      const d = await r.json();
+      if (!d.erro) setForm((f) => ({ ...f, logradouro: d.logradouro || "", bairro: d.bairro || "", cidade: d.localidade || "", uf: d.uf || "" }));
+    } catch (e) {}
+  };
   const salvar = async () => {
     if (!form.name) { toast("Informe o nome"); return; }
-    if (form.id) {
-      const { error } = await supabase.from("customers").update({ name: form.name, phone: form.phone }).eq("id", form.id);
-      if (error) return toast("Erro: " + error.message);
-      toast("Cliente atualizado");
-    } else {
-      const { error } = await supabase.from("customers").insert({ storeId: STORE_ID, name: form.name, phone: form.phone, cashbackEnabled: true });
-      if (error) return toast("Erro: " + error.message);
-      toast("Cliente cadastrado");
-    }
-    setForm(null); load();
+    const payload = { name: form.name, phone: form.phone, email: form.email || null, cep: form.cep || null, logradouro: form.logradouro || null, numero: form.numero || null, bairro: form.bairro || null, cidade: form.cidade || null, uf: form.uf || null };
+    let error;
+    if (form.id) ({ error } = await supabase.from("customers").update(payload).eq("id", form.id));
+    else ({ error } = await supabase.from("customers").insert({ ...payload, storeId: STORE_ID, cashbackEnabled: true }));
+    if (error) return toast("Erro: " + error.message);
+    toast(form.id ? "Cliente atualizado" : "Cliente cadastrado"); setForm(null); load();
   };
   const excluir = async (c) => {
     if (!window.confirm("Excluir \"" + c.name + "\"? Esta ação remove do banco.")) return;
@@ -1144,7 +1281,7 @@ function Clientes({ toast }) {
 
   return (
     <Section title="Clientes & cashback" desc="Cadastro real no banco — adicione, edite, exclua e ative o cashback por cliente."
-      right={<Btn icon={Plus} onClick={() => setForm({ name: "", phone: "" })}>Novo cliente</Btn>}>
+      right={<Btn icon={Plus} onClick={() => setForm({ name: "", phone: "", email: "", cep: "", logradouro: "", numero: "", bairro: "", cidade: "", uf: "" })}>Novo cliente</Btn>}>
       {loading ? <p className="text-sm" style={{ color: "#9AA0A6" }}>Carregando...</p> : (
         <Card className="p-0 overflow-hidden">
           <div className="overflow-x-auto">
@@ -1160,7 +1297,7 @@ function Clientes({ toast }) {
                     <td className="px-4 py-3" style={{ color: "#4B5563" }}>{money(Number(c.totalSpent))}</td>
                     <td className="px-4 py-3"><Toggle on={c.cashbackEnabled} onChange={(v) => toggleCashback(c, v)} /></td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <button onClick={() => setForm({ id: c.id, name: c.name, phone: c.phone || "" })} className="text-sm font-semibold mr-3" style={{ color: NAVY }}>Editar</button>
+                      <button onClick={() => setForm({ id: c.id, name: c.name, phone: c.phone || "", email: c.email || "", cep: c.cep || "", logradouro: c.logradouro || "", numero: c.numero || "", bairro: c.bairro || "", cidade: c.cidade || "", uf: c.uf || "" })} className="text-sm font-semibold mr-3" style={{ color: NAVY }}>Editar</button>
                       <button onClick={() => excluir(c)} className="text-sm font-semibold" style={{ color: "#C0392B" }}>Excluir</button>
                     </td>
                   </tr>
@@ -1178,7 +1315,19 @@ function Clientes({ toast }) {
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
             <label className="text-sm font-medium" style={{ color: NAVY }}>Telefone</label>
             <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
-            <Btn className="w-full mt-2" icon={Check} onClick={salvar}>{form.id ? "Salvar alterações" : "Cadastrar"}</Btn>
+            <label className="text-sm font-medium" style={{ color: NAVY }}>E-mail</label>
+            <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} type="email" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            <div className="grid grid-cols-3 gap-2">
+              <div className="col-span-2"><label className="text-sm font-medium" style={{ color: NAVY }}>CEP</label><input value={form.cep} onChange={(e) => setForm({ ...form, cep: e.target.value })} onBlur={(e) => buscarCep(e.target.value)} placeholder="00000-000" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /></div>
+              <div><label className="text-sm font-medium" style={{ color: NAVY }}>Nº</label><input value={form.numero} onChange={(e) => setForm({ ...form, numero: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /></div>
+            </div>
+            <input value={form.logradouro} readOnly placeholder="Rua (preenche pelo CEP)" className="w-full mb-2 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#EEE", background: "#FAFAFA", color: "#4B5563" }} />
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <input value={form.bairro} readOnly placeholder="Bairro" className="col-span-1 px-3 py-2.5 rounded-xl border text-sm" style={{ borderColor: "#EEE", background: "#FAFAFA", color: "#4B5563" }} />
+              <input value={form.cidade} readOnly placeholder="Cidade" className="col-span-1 px-3 py-2.5 rounded-xl border text-sm" style={{ borderColor: "#EEE", background: "#FAFAFA", color: "#4B5563" }} />
+              <input value={form.uf} readOnly placeholder="UF" className="col-span-1 px-3 py-2.5 rounded-xl border text-sm" style={{ borderColor: "#EEE", background: "#FAFAFA", color: "#4B5563" }} />
+            </div>
+            <Btn className="w-full mt-1" icon={Check} onClick={salvar}>{form.id ? "Salvar alterações" : "Cadastrar"}</Btn>
           </Card>
         </div>
       )}
@@ -1186,11 +1335,24 @@ function Clientes({ toast }) {
   );
 }
 
-function Clube() {
+function Clube({ toast }) {
   const [ativo, setAtivo] = useState(true);
   const [pct, setPct] = useState(5);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("store_settings").select("*").eq("storeId", STORE_ID).maybeSingle();
+      if (data) { setAtivo(data.cashbackEnabled); setPct(Number(data.cashbackPercent)); }
+      setLoading(false);
+    })();
+  }, []);
+  const salvar = async () => {
+    const { error } = await supabase.from("store_settings").upsert({ storeId: STORE_ID, cashbackEnabled: ativo, cashbackPercent: pct, updatedAt: new Date().toISOString() }, { onConflict: "storeId" });
+    if (error) return toast("Erro: " + error.message);
+    toast("Configuração de cashback salva");
+  };
   return (
-    <Section title="Clube de pontos" desc="Cashback 100% configurável — defina a regra e ligue para a loja toda ou por cliente.">
+    <Section title="Clube de pontos" desc="Cashback 100% configurável — defina a regra e salve." right={<Btn icon={Check} onClick={salvar} disabled={loading}>Salvar</Btn>}>
       <div className="grid md:grid-cols-2 gap-4">
         <Card className="p-6">
           <div className="flex items-center justify-between"><div className="flex items-center gap-2"><Gift size={18} color={ORANGE} /><span className="font-bold" style={{ color: NAVY }}>Clube Zip ativo</span></div><Toggle on={ativo} onChange={setAtivo} /></div>
@@ -1198,12 +1360,14 @@ function Clube() {
           <div className="mt-6"><label className="text-sm font-medium" style={{ color: NAVY }}>Cashback por compra: <b style={{ color: ORANGE }}>{pct}%</b></label>
             <input type="range" min="0" max="20" value={pct} onChange={(e) => setPct(+e.target.value)} className="w-full mt-2" style={{ accentColor: ORANGE }} />
           </div>
+          <Btn className="w-full mt-5" icon={Check} onClick={salvar} disabled={loading}>Salvar configuração</Btn>
         </Card>
         <Card className="p-6">
           <h3 className="font-bold mb-3" style={{ color: NAVY }}>Simulação</h3>
           {[["Compra de R$ 100", money(100 * pct / 100) + " em Zips"], ["Compra de R$ 250", money(250 * pct / 100) + " em Zips"], ["Cliente com 540 Zips", "R$ 540 disponíveis"]].map((r) => (
             <div key={r[0]} className="flex items-center justify-between py-2 border-b" style={{ borderColor: "#F2F2F2" }}><span className="text-sm" style={{ color: "#4B5563" }}>{r[0]}</span><span className="font-semibold text-sm" style={{ color: NAVY }}>{r[1]}</span></div>
           ))}
+          <p className="text-xs mt-3" style={{ color: "#9AA0A6" }}>{ativo ? "Clube ativo a " + pct + "% por compra." : "Clube desativado."}</p>
         </Card>
       </div>
     </Section>
@@ -1570,6 +1734,15 @@ function useNewOrderSound(orders, enabled) {
     if (isNew && enabled) beep();
   }, [orders, enabled]);
 }
+function useAudioAutoUnlock() {
+  useEffect(() => {
+    const h = () => { unlockAudio(); };
+    window.addEventListener("pointerdown", h, { once: true });
+    window.addEventListener("keydown", h, { once: true });
+    unlockAudio();
+    return () => { window.removeEventListener("pointerdown", h); window.removeEventListener("keydown", h); };
+  }, []);
+}
 function useClock() {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
@@ -1588,7 +1761,8 @@ function SoundBtn({ on, onToggle }) {
 function Cozinha() {
   const orders = useLive();
   const now = useClock();
-  const [sound, setSound] = useState(false);
+  const [sound, setSound] = useState(true);
+  useAudioAutoUnlock();
   useNewOrderSound(orders, sound);
   const toggle = () => { if (!sound) { unlockAudio(); beep(); setSound(true); } else setSound(false); };
   const cols = [["novo", "Novos", "#C0392B", Flame], ["producao", "Em produção", "#D35400", ChefHat], ["pronto", "Prontos", "#1B7F4B", Check]];
@@ -1631,7 +1805,8 @@ function Cozinha() {
 function PedidosVivo({ toast }) {
   const orders = useLive();
   const now = useClock();
-  const [sound, setSound] = useState(false);
+  const [sound, setSound] = useState(true);
+  useAudioAutoUnlock();
   useNewOrderSound(orders, sound);
   const toggle = () => { if (!sound) { unlockAudio(); beep(); setSound(true); } else setSound(false); };
   const ativos = orders.filter((o) => o.status !== "concluido");
@@ -1809,6 +1984,7 @@ export default function App() {
       {screen === "home" && <Landing onLogin={() => setScreen("login")} onCliente={() => setScreen("cliente")} toast={toast} />}
       {screen === "login" && <Login onEnter={setScreen} onDono={() => goAdmin("dashboard", null)} />}
       {screen === "pdvlogin" && <PDVLogin onBack={() => setScreen("login")} onEnter={(op) => goAdmin("pdv", op)} />}
+      {screen === "cadentregador" && <CourierSignup onBack={() => setScreen("login")} />}
       {screen === "admin" && <Admin onExit={() => setScreen("home")} startMod={adminInit.mod} operador={adminInit.operador} />}
       {screen === "cliente" && <ClienteApp onExit={() => setScreen("home")} toast={toast} />}
       {toastMsg && (
