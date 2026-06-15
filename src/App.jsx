@@ -1200,7 +1200,7 @@ function Delivery({ toast }) {
           ))}
         </div>
         <Card className="p-5">
-          <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>Entregadores</h3><Btn variant="ghost" size="sm" icon={Plus} onClick={() => setForm({ name: "", phone: "", email: "", vehicleType: "Moto" })}>Cadastrar</Btn></div>
+          <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>Entregadores</h3><div className="flex gap-2"><button onClick={load} className="text-sm font-semibold" style={{ color: NAVY }}>Atualizar</button><Btn variant="ghost" size="sm" icon={Plus} onClick={() => setForm({ name: "", phone: "", email: "", vehicleType: "Moto" })}>Cadastrar</Btn></div></div>
           {couriers.length === 0 && <p className="text-sm" style={{ color: "#9AA0A6" }}>Nenhum entregador. Eles podem se cadastrar pela tela de entrada e aparecem aqui pra você autorizar.</p>}
           {couriers.map((c) => (
             <div key={c.id} className="flex items-center justify-between py-2 border-b" style={{ borderColor: "#F2F2F2" }}>
@@ -1602,6 +1602,50 @@ function Cardapio({ toast }) {
 
 /* ============================ Área do cliente ============================ */
 const LOJA_NOME = "Padaria Zipão Demo — Centro";
+const PED_LABEL = { novo: "Pedido enviado", aceito: "Pedido aceito", producao: "Preparando seu pedido", pronto: "Pedido pronto", coletado: "Entregador coletou o pedido", entrega: "Saiu para entrega", entregue: "Pedido entregue" };
+const PED_FLOW_ENTREGA = ["novo", "aceito", "producao", "pronto", "coletado", "entrega", "entregue"];
+const PED_FLOW_RETIRADA = ["novo", "aceito", "producao", "pronto", "entregue"];
+const normPedStatus = (s) => ({ Recebido: "novo", novo: "novo", aceito: "aceito", "Em produção": "producao", producao: "producao", Pronto: "pronto", pronto: "pronto", coletado: "coletado", entrega: "entrega", "Saiu para entrega": "entrega", entregue: "entregue", Entregue: "entregue", concluido: "entregue" }[s] || "novo");
+
+function AcompanharPedido({ done, onNovo, onExit }) {
+  const [status, setStatus] = useState("novo");
+  useEffect(() => {
+    let alive = true;
+    const fetchSt = async () => { try { const { data } = await supabase.from("pedidos").select("status").eq("id", done.id).single(); if (alive && data) setStatus(normPedStatus(data.status)); } catch (e) {} };
+    fetchSt(); const t = setInterval(fetchSt, 5000); return () => { alive = false; clearInterval(t); };
+  }, [done.id]);
+  const flow = done.tipo === "entrega" ? PED_FLOW_ENTREGA : PED_FLOW_RETIRADA;
+  const idx = Math.max(0, flow.indexOf(status));
+  const entregue = status === "entregue";
+  return (
+    <div className="min-h-screen" style={{ background: CREAM }}>
+      <header style={{ background: NAVY }}><div className="max-w-md mx-auto px-4 py-3 flex items-center gap-2"><ZipIcon size={32} /><div className="text-white font-bold" style={{ fontFamily: "Fredoka, sans-serif" }}>{LOJA_NOME}</div></div></header>
+      <div className="max-w-md mx-auto p-4">
+        <Card className="p-6">
+          <div className="text-center mb-5">
+            <div className="h-14 w-14 rounded-full flex items-center justify-center mx-auto mb-3" style={{ background: SOFT }}>{entregue ? <Check size={28} color={ORANGE} /> : <Clock size={26} color={ORANGE} />}</div>
+            <h2 className="text-xl font-bold" style={{ color: NAVY }}>{entregue ? "Você recebeu seu pedido!" : "Acompanhe seu pedido"}</h2>
+            <p className="text-sm mt-1" style={{ color: "#6B7280" }}>Pedido #{done.num} · {money(done.total)}</p>
+          </div>
+          <div>
+            {flow.map((s, i) => { const dn = i < idx, cur = i === idx; return (
+              <div key={s} className="flex gap-3">
+                <div className="flex flex-col items-center">
+                  <div className="h-8 w-8 rounded-full flex items-center justify-center" style={{ background: (dn || cur) ? ORANGE : "#E5E7EB", color: "#fff" }}>{dn ? <Check size={16} /> : cur ? <Clock size={15} /> : <span className="text-xs font-bold">{i + 1}</span>}</div>
+                  {i < flow.length - 1 && <div style={{ width: 2, height: 26, background: dn ? ORANGE : "#E5E7EB" }} />}
+                </div>
+                <div className="pb-4 pt-1"><div className="text-sm font-semibold" style={{ color: (dn || cur) ? NAVY : "#9AA0A6" }}>{PED_LABEL[s]}</div>{cur && !entregue && <div className="text-xs" style={{ color: ORANGE }}>Em andamento…</div>}</div>
+              </div>
+            ); })}
+          </div>
+          <Btn className="w-full mt-2" onClick={onNovo}>Fazer novo pedido</Btn>
+          <button onClick={onExit} className="w-full mt-2 text-sm font-semibold" style={{ color: "#6B7280" }}>Sair</button>
+        </Card>
+        <p className="text-xs text-center mt-3" style={{ color: "#9AA0A6" }}>Esta tela atualiza sozinha conforme a loja prepara seu pedido.</p>
+      </div>
+    </div>
+  );
+}
 const EXTRAS_SUG = [{ n: "Bacon extra", p: 4 }, { n: "Refrigerante lata", p: 6 }, { n: "Porção de batata", p: 9 }, { n: "Sobremesa do dia", p: 8 }];
 
 function ClienteApp({ onExit, toast }) {
@@ -1633,9 +1677,9 @@ function ClienteApp({ onExit, toast }) {
     if (co.tipo === "entrega" && !co.cep) return toast("Informe o endereço de entrega");
     const endereco = co.tipo === "entrega" ? (co.rua + ", " + co.num + (co.comp ? " - " + co.comp : "") + " - " + co.bairro + ", " + co.cidade + "/" + co.uf) : "Retirada na loja";
     const itens = cart.map((x) => ({ nome: x.n, qtd: x.q, preco: x.p, extras: x.extras.map((e) => e.n), obs: x.obs }));
-    const { error } = await supabase.from("pedidos").insert({ storeId: STORE_ID, tipo: co.tipo, cliente: co.nome, telefone: co.tel, endereco, itens, total, pagamento: co.pagamento });
+    const { data, error } = await supabase.from("pedidos").insert({ storeId: STORE_ID, tipo: co.tipo, cliente: co.nome, telefone: co.tel, endereco, itens, total, pagamento: co.pagamento, status: "novo" }).select("id").single();
     if (error) return toast("Erro: " + error.message);
-    setDone({ num: Math.floor(1000 + Math.random() * 9000), total, tipo: co.tipo, endereco, pagamento: co.pagamento }); setCart([]);
+    setDone({ id: data.id, num: String(data.id).replace(/-/g, "").slice(0, 4).toUpperCase(), total, tipo: co.tipo, endereco, pagamento: co.pagamento }); setCart([]);
   };
   const enviarEncomenda = async () => {
     if (!enc.item || !enc.nome) return toast("Informe o item e seu nome");
@@ -1645,24 +1689,7 @@ function ClienteApp({ onExit, toast }) {
   };
 
   if (done) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{ background: CREAM }}>
-        <Card className="w-full max-w-md p-8 text-center">
-          <div className="h-16 w-16 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: SOFT }}><Check size={32} color={ORANGE} /></div>
-          <h2 className="text-2xl font-bold" style={{ color: NAVY }}>Pedido confirmado!</h2>
-          <p className="text-sm mt-1" style={{ color: "#6B7280" }}>{LOJA_NOME}</p>
-          <div className="text-left mt-5 p-4 rounded-xl" style={{ background: "#FAFAFA" }}>
-            <div className="flex justify-between text-sm"><span style={{ color: "#6B7280" }}>Pedido</span><span className="font-bold" style={{ color: NAVY }}>#{done.num}</span></div>
-            <div className="flex justify-between text-sm mt-1"><span style={{ color: "#6B7280" }}>{done.tipo === "entrega" ? "Entrega estimada" : "Retirada"}</span><span style={{ color: NAVY }}>{done.tipo === "entrega" ? "~40 min" : "~20 min"}</span></div>
-            <div className="flex justify-between text-sm mt-1"><span style={{ color: "#6B7280" }}>Pagamento</span><span style={{ color: NAVY }}>{done.pagamento}</span></div>
-            <div className="flex justify-between mt-2 pt-2 border-t" style={{ borderColor: "#EEE" }}><span className="font-semibold" style={{ color: NAVY }}>Total</span><span className="font-bold" style={{ color: ORANGE }}>{money(done.total)}</span></div>
-          </div>
-          <p className="text-xs mt-3" style={{ color: "#9AA0A6" }}>{done.tipo === "entrega" ? done.endereco : "Retire no balcão da loja."}</p>
-          <Btn className="w-full mt-5" onClick={() => { setDone(null); setTab("cardapio"); }}>Fazer novo pedido</Btn>
-          <button onClick={onExit} className="w-full mt-2 text-sm font-semibold" style={{ color: "#6B7280" }}>Sair</button>
-        </Card>
-      </div>
-    );
+    return <AcompanharPedido done={done} onNovo={() => { setDone(null); setTab("cardapio"); }} onExit={onExit} />;
   }
 
   const tabs = [["cardapio", "Cardápio", Utensils], ["pedido", "Carrinho", ShoppingCart], ["encomenda", "Encomenda", Calendar], ["clube", "Zips", Gift]];
@@ -1843,32 +1870,39 @@ function distKm(a, b) {
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
-const _now0 = Date.now();
-const seedOrders = [
-  { id: "o1", numero: 41, tipo: "mesa", mesa: "5", cliente: "Marina", status: "producao", createdAt: _now0 - 300000, itens: [{ n: "Pizza calabresa", q: 1 }, { n: "Refri lata", q: 2 }] },
-  { id: "o2", numero: 42, tipo: "delivery", cliente: "Pedro Santos", status: "pronto", createdAt: _now0 - 540000, bairro: "Vila Mariana", endereco: "Rua Domingos de Morais, 1200 - São Paulo", lat: -23.5896, lng: -46.6388, itens: [{ n: "Zip Burger", q: 2 }, { n: "Batata", q: 1 }] },
-  { id: "o3", numero: 43, tipo: "whatsapp", cliente: "Camila", status: "novo", createdAt: _now0 - 60000, itens: [{ n: "Bolo fatia", q: 3 }] },
-  { id: "o4", numero: 44, tipo: "delivery", cliente: "Ana Lima", status: "pronto", createdAt: _now0 - 200000, bairro: "Saúde", endereco: "Av. Jabaquara, 500 - São Paulo", lat: -23.6200, lng: -46.6400, itens: [{ n: "Pão de metro", q: 1 }] },
-];
+const _mapStatus = (s) => ({ "Recebido": "novo", "novo": "novo", "aceito": "aceito", "producao": "producao", "Em produção": "producao", "pronto": "pronto", "Pronto": "pronto", "coletado": "coletado", "entrega": "entrega", "Saiu para entrega": "entrega", "concluido": "concluido", "entregue": "concluido", "Entregue": "concluido" }[s] || "novo");
+const _mapTipo = (t) => t === "entrega" ? "delivery" : t === "retirada" ? "avulso" : t === "mesa" ? "mesa" : "whatsapp";
+const _fromRow = (r) => ({
+  id: r.id,
+  numero: String(r.id || "").replace(/-/g, "").slice(0, 4).toUpperCase(),
+  tipo: _mapTipo(r.tipo),
+  cliente: r.cliente || "Cliente",
+  telefone: r.telefone || "",
+  endereco: r.endereco || "",
+  itens: Array.isArray(r.itens) ? r.itens.map((it) => ({ n: it.nome || it.n || "Item", q: it.qtd || it.q || 1 })) : [],
+  status: _mapStatus(r.status),
+  createdAt: r.createdAt ? new Date(r.createdAt).getTime() : Date.now(),
+  total: Number(r.total) || 0,
+});
 const liveStore = (function () {
-  let orders = seedOrders.slice(), subs = [], started = false, seq = 45;
+  let orders = [], subs = [], started = false;
   const emit = () => subs.forEach((f) => f(orders.slice()));
-  const novoPedido = () => {
-    const nomes = ["João", "Lúcia", "Bruno", "Carla", "Diego", "Patrícia", "Rafael"];
-    const tipos = ["mesa", "delivery", "whatsapp", "avulso"];
-    const pool = [{ n: "Pizza margherita", q: 1 }, { n: "Zip Burger", q: 2 }, { n: "Café", q: 1 }, { n: "Coxinha", q: 4 }, { n: "Pão francês", q: 6 }, { n: "Torta", q: 1 }];
-    const ends = [{ e: "Rua Vergueiro, 1000 - São Paulo", b: "Liberdade", lat: -23.571, lng: -46.639 }, { e: "Av. Paulista, 900 - São Paulo", b: "Bela Vista", lat: -23.563, lng: -46.654 }, { e: "Rua do Ipiranga, 200 - São Paulo", b: "Ipiranga", lat: -23.591, lng: -46.610 }];
-    const tipo = tipos[Math.floor(Math.random() * tipos.length)];
-    const o = { id: "o" + seq, numero: seq, tipo, cliente: nomes[Math.floor(Math.random() * nomes.length)], status: "novo", createdAt: Date.now(), itens: [pool[Math.floor(Math.random() * pool.length)]] };
-    if (tipo === "mesa") o.mesa = String(2 + Math.floor(Math.random() * 15));
-    if (tipo === "delivery") { const a = ends[Math.floor(Math.random() * ends.length)]; o.endereco = a.e; o.bairro = a.b; o.lat = a.lat; o.lng = a.lng; }
-    seq++; orders = [o, ...orders]; emit();
+  const refresh = async () => {
+    try {
+      const { data } = await supabase.from("pedidos").select("*").eq("storeId", STORE_ID).neq("status", "concluido").neq("status", "entregue").order("createdAt", { ascending: false });
+      if (data) { orders = data.map(_fromRow); emit(); }
+    } catch (e) {}
   };
   return {
     get: () => orders.slice(),
     sub: (f) => { subs.push(f); return () => { subs = subs.filter((s) => s !== f); }; },
-    update: (id, patch) => { orders = orders.map((o) => o.id === id ? { ...o, ...patch } : o); emit(); },
-    startSim: () => { if (started) return; started = true; setInterval(novoPedido, 25000); },
+    refresh,
+    update: (id, patch) => {
+      orders = orders.map((o) => o.id === id ? { ...o, ...patch } : o);
+      emit();
+      if (patch.status) { try { supabase.from("pedidos").update({ status: patch.status }).eq("id", id).then(() => {}); } catch (e) {} }
+    },
+    startSim: () => { if (started) return; started = true; refresh(); setInterval(refresh, 8000); },
   };
 })();
 function useLive() {
@@ -1917,14 +1951,14 @@ function Cozinha() {
   useAudioAutoUnlock();
   useNewOrderSound(orders, sound);
   const toggle = () => { if (!sound) { unlockAudio(); beep(); setSound(true); } else setSound(false); };
-  const cols = [["novo", "Novos", "#C0392B", Flame], ["producao", "Em produção", "#D35400", ChefHat], ["pronto", "Prontos", "#1B7F4B", Check]];
+  const cols = [["novo", "Novos / aceitos", "#C0392B", Flame], ["producao", "Em produção", "#D35400", ChefHat], ["pronto", "Prontos", "#1B7F4B", Check]];
   const next = { novo: "producao", producao: "pronto" };
   const label = { novo: "Iniciar produção", producao: "Marcar pronto" };
   return (
     <Section title="Cozinha (KDS)" desc="Pedidos em tempo real. Toque para avançar a produção." right={<SoundBtn on={sound} onToggle={toggle} />}>
       <div className="grid md:grid-cols-3 gap-4">
         {cols.map(([st, titulo, cor, Ic]) => {
-          const list = orders.filter((o) => o.status === st);
+          const list = orders.filter((o) => st === "novo" ? (o.status === "novo" || o.status === "aceito") : o.status === st);
           return (
             <div key={st}>
               <div className="flex items-center justify-between mb-2"><h3 className="font-bold inline-flex items-center gap-2" style={{ color: NAVY }}><Ic size={16} color={cor} />{titulo}</h3><span className="text-sm font-bold" style={{ color: cor }}>{list.length}</span></div>
@@ -1936,13 +1970,13 @@ function Cozinha() {
                       <div className="font-bold" style={{ color: NAVY }}>#{o.numero} · {o.cliente}</div>
                       <span className="text-xs font-semibold inline-flex items-center gap-1" style={{ color: late ? "#C0392B" : "#9AA0A6" }}><Timer size={13} />{fmtTimer(now - o.createdAt)}</span>
                     </div>
-                    <div className="mt-1 mb-3"><TipoPill tipo={o.tipo} mesa={o.mesa} /></div>
+                    <div className="mt-1 mb-3 flex items-center gap-2"><TipoPill tipo={o.tipo} mesa={o.mesa} />{o.status === "novo" && <Pill tone="red">Aguarda aceite</Pill>}</div>
                     <ul className="text-sm space-y-1 mb-3" style={{ color: "#4B5563" }}>{o.itens.map((it, i) => <li key={i}>{it.q}× {it.n}</li>)}</ul>
                     {st !== "pronto"
                       ? <Btn size="sm" className="w-full" icon={st === "novo" ? Flame : Check} onClick={() => liveStore.update(o.id, { status: next[st] })}>{label[st]}</Btn>
                       : (o.tipo === "delivery"
                         ? <div className="text-xs text-center py-2 rounded-lg" style={{ background: SOFT, color: ORANGE }}>Aguardando entregador</div>
-                        : <Btn size="sm" variant="ghost" className="w-full" icon={Check} onClick={() => liveStore.update(o.id, { status: "concluido" })}>Concluir</Btn>)}
+                        : <Btn size="sm" variant="ghost" className="w-full" icon={Check} onClick={() => liveStore.update(o.id, { status: "entregue" })}>Entregar / concluir</Btn>)}
                   </Card>
                 ); })}
               </div>
@@ -1961,10 +1995,10 @@ function PedidosVivo({ toast }) {
   useAudioAutoUnlock();
   useNewOrderSound(orders, sound);
   const toggle = () => { if (!sound) { unlockAudio(); beep(); setSound(true); } else setSound(false); };
-  const ativos = orders.filter((o) => o.status !== "concluido");
-  const stInfo = { novo: ["Novo", "red"], producao: ["Em produção", "orange"], pronto: ["Pronto", "green"], entrega: ["Saiu p/ entrega", "blue"] };
+  const ativos = orders.filter((o) => o.status !== "concluido" && o.status !== "entregue");
+  const stInfo = { novo: ["Novo", "red"], aceito: ["Aceito", "blue"], producao: ["Em produção", "orange"], pronto: ["Pronto", "green"], coletado: ["Coletado", "navy"], entrega: ["Saiu p/ entrega", "blue"] };
   return (
-    <Section title="Pedidos ao vivo" desc="Acompanhe os pedidos chegando e cobre a cozinha quando atrasar." right={<SoundBtn on={sound} onToggle={toggle} />}>
+    <Section title="Pedidos ao vivo" desc="Aceite os pedidos que chegam e cobre a cozinha quando atrasar." right={<SoundBtn on={sound} onToggle={toggle} />}>
       <div className="space-y-2">
         {ativos.length === 0 && <Card className="p-8 text-center"><span className="text-sm" style={{ color: "#9AA0A6" }}>Nenhum pedido ativo.</span></Card>}
         {ativos.map((o) => { const [t, tone] = stInfo[o.status] || ["", "gray"]; const late = now - o.createdAt > 480000; return (
@@ -1979,7 +2013,8 @@ function PedidosVivo({ toast }) {
             <div className="flex items-center gap-3">
               <span className="text-xs inline-flex items-center gap-1" style={{ color: late ? "#C0392B" : "#9AA0A6" }}><Timer size={13} />{fmtTimer(now - o.createdAt)}</span>
               <Pill tone={tone}>{t}</Pill>
-              {(o.status === "novo" || o.status === "producao") && <Btn size="sm" variant="ghost" icon={BellIcon} onClick={() => { liveStore.update(o.id, { urgent: true }); toast("Cozinha avisada sobre #" + o.numero); }}>Cobrar</Btn>}
+              {o.status === "novo" && <Btn size="sm" icon={Check} onClick={() => { liveStore.update(o.id, { status: "aceito" }); toast("Pedido #" + o.numero + " aceito"); }}>Aceitar</Btn>}
+              {(o.status === "aceito" || o.status === "producao") && <Btn size="sm" variant="ghost" icon={BellIcon} onClick={() => { liveStore.update(o.id, { urgent: true }); toast("Cozinha avisada sobre #" + o.numero); }}>Cobrar</Btn>}
             </div>
           </Card>
         ); })}
@@ -1993,9 +2028,9 @@ function Entregador({ toast }) {
   const [recusados, setRecusados] = useState([]);
   const [sound, setSound] = useState(false);
   const disp = orders.filter((o) => o.tipo === "delivery" && o.status === "pronto" && !recusados.includes(o.id))
-    .map((o) => ({ ...o, km: o.lat ? distKm(STORE_COORD, { lat: o.lat, lng: o.lng }) : 0 }))
-    .sort((a, b) => a.km - b.km);
-  const minhas = orders.filter((o) => o.status === "entrega");
+    .map((o) => ({ ...o, km: o.lat ? distKm(STORE_COORD, { lat: o.lat, lng: o.lng }) : null }))
+    .sort((a, b) => (a.km ?? 999) - (b.km ?? 999));
+  const minhas = orders.filter((o) => o.status === "coletado" || o.status === "entrega");
   useNewOrderSound(disp, sound);
   const toggle = () => { if (!sound) { unlockAudio(); beep(); setSound(true); } else setSound(false); };
   const maps = (o) => window.open("https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(o.endereco), "_blank");
@@ -2006,23 +2041,28 @@ function Entregador({ toast }) {
         <div className="space-y-2 mb-5">
           {minhas.map((o) => (
             <Card key={o.id} className="p-4">
-              <div className="flex items-center justify-between"><div className="font-bold" style={{ color: NAVY }}>#{o.numero} · {o.cliente}</div><Pill tone="blue">A caminho</Pill></div>
+              <div className="flex items-center justify-between"><div className="font-bold" style={{ color: NAVY }}>#{o.numero} · {o.cliente}</div><Pill tone="blue">{o.status === "coletado" ? "Coletado" : "A caminho"}</Pill></div>
               <div className="text-sm mt-1 flex items-center gap-1" style={{ color: "#6B7280" }}><MapPin size={14} />{o.endereco}</div>
-              <div className="flex gap-2 mt-3"><Btn size="sm" icon={Navigation} onClick={() => maps(o)}>Rota no Maps</Btn><Btn size="sm" variant="ghost" icon={Check} onClick={() => { liveStore.update(o.id, { status: "concluido" }); toast("Entrega #" + o.numero + " concluída"); }}>Entregue</Btn></div>
+              <div className="flex gap-2 mt-3">
+                <Btn size="sm" icon={Navigation} onClick={() => maps(o)}>Rota no Maps</Btn>
+                {o.status === "coletado"
+                  ? <Btn size="sm" icon={Truck} onClick={() => { liveStore.update(o.id, { status: "entrega" }); toast("Saiu para entrega #" + o.numero); }}>Saiu para entrega</Btn>
+                  : <Btn size="sm" variant="ghost" icon={Check} onClick={() => { liveStore.update(o.id, { status: "entregue" }); toast("Entrega #" + o.numero + " concluída"); }}>Entregue</Btn>}
+              </div>
             </Card>
           ))}
         </div>
       </>)}
-      <h3 className="font-bold mb-2" style={{ color: NAVY }}>Disponíveis (mais perto primeiro)</h3>
+      <h3 className="font-bold mb-2" style={{ color: NAVY }}>Disponíveis para coletar</h3>
       <div className="space-y-2">
         {disp.length === 0 && <Card className="p-8 text-center"><span className="text-sm" style={{ color: "#9AA0A6" }}>Nenhuma entrega disponível agora.</span></Card>}
         {disp.map((o) => (
           <Card key={o.id} className="p-4">
-            <div className="flex items-center justify-between"><div className="font-bold" style={{ color: NAVY }}>#{o.numero} · {o.cliente}</div><span className="text-sm font-bold inline-flex items-center gap-1" style={{ color: ORANGE }}><Bike size={14} />{o.km.toFixed(1)} km</span></div>
-            <div className="text-sm mt-1 flex items-center gap-1" style={{ color: "#6B7280" }}><MapPin size={14} />{o.endereco} · {o.bairro}</div>
+            <div className="flex items-center justify-between"><div className="font-bold" style={{ color: NAVY }}>#{o.numero} · {o.cliente}</div>{o.km != null ? <span className="text-sm font-bold inline-flex items-center gap-1" style={{ color: ORANGE }}><Bike size={14} />{o.km.toFixed(1)} km</span> : <Pill tone="orange">Entrega</Pill>}</div>
+            <div className="text-sm mt-1 flex items-center gap-1" style={{ color: "#6B7280" }}><MapPin size={14} />{o.endereco || "Endereço no pedido"}{o.bairro ? " · " + o.bairro : ""}</div>
             <div className="text-xs mt-1" style={{ color: "#9AA0A6" }}>{o.itens.map((it) => it.q + "× " + it.n).join(", ")}</div>
             <div className="flex gap-2 mt-3">
-              <Btn size="sm" icon={ThumbsUp} onClick={() => { liveStore.update(o.id, { status: "entrega" }); toast("Entrega #" + o.numero + " aceita"); }}>Aceitar</Btn>
+              <Btn size="sm" icon={ThumbsUp} onClick={() => { liveStore.update(o.id, { status: "coletado" }); toast("Pedido #" + o.numero + " coletado"); }}>Aceitar / coletar</Btn>
               <Btn size="sm" variant="ghost" icon={ThumbsDown} onClick={() => setRecusados((r) => [...r, o.id])}>Recusar</Btn>
               <Btn size="sm" variant="ghost" icon={Navigation} onClick={() => maps(o)}>Rota</Btn>
             </div>
@@ -2128,8 +2168,18 @@ export default function App() {
   const [screen, setScreen] = useState("home");
   const [adminInit, setAdminInit] = useState({ mod: "dashboard", operador: null });
   const [toastMsg, setToastMsg] = useState(null);
+  const [booting, setBooting] = useState(true);
   const toast = (m) => { setToastMsg(m); setTimeout(() => setToastMsg(null), 2400); };
   const goAdmin = (mod, operador) => { setAdminInit({ mod: mod || "dashboard", operador: operador || null }); setScreen("admin"); };
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (data && data.session) { setAdminInit({ mod: "dashboard", operador: null }); setScreen("admin"); }
+      setBooting(false);
+    }).catch(() => setBooting(false));
+  }, []);
+  if (booting) {
+    return <div className="min-h-screen flex items-center justify-center" style={{ background: CREAM }}><ZipIcon size={56} /></div>;
+  }
   return (
     <div style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
       <style>{"@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@600&display=swap');"}</style>
