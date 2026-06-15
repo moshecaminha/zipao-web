@@ -1601,65 +1601,217 @@ function Cardapio({ toast }) {
 }
 
 /* ============================ Área do cliente ============================ */
+const LOJA_NOME = "Padaria Zipão Demo — Centro";
+const EXTRAS_SUG = [{ n: "Bacon extra", p: 4 }, { n: "Refrigerante lata", p: 6 }, { n: "Porção de batata", p: 9 }, { n: "Sobremesa do dia", p: 8 }];
+
 function ClienteApp({ onExit, toast }) {
   const [tab, setTab] = useState("cardapio");
   const [cart, setCart] = useState([]);
-  const add = (p) => setCart((c) => [...c, p]);
-  const total = cart.reduce((s, x) => s + x.p, 0);
-  const tabs = [["cardapio", "Cardápio", Utensils], ["pedido", "Meu pedido", ShoppingCart], ["clube", "Meus Zips", Gift]];
+  const [sel, setSel] = useState(null);
+  const [qty, setQty] = useState(1);
+  const [obs, setObs] = useState("");
+  const [extras, setExtras] = useState([]);
+  const [done, setDone] = useState(null);
+  const [co, setCo] = useState({ tipo: "entrega", nome: "", tel: "", cep: "", rua: "", num: "", comp: "", bairro: "", cidade: "", uf: "", pagamento: "Pix" });
+  const [enc, setEnc] = useState({ item: "", quando: "", obs: "", nome: "", tel: "" });
+  const [encDone, setEncDone] = useState(false);
+
+  const cats = UNITS.filter((u) => PRODUTOS[u.k] && u.k !== "pesagem");
+  const itemTotal = (x) => (x.p + x.extras.reduce((s, e) => s + e.p, 0)) * x.q;
+  const total = cart.reduce((s, x) => s + itemTotal(x), 0);
+  const count = cart.reduce((s, x) => s + x.q, 0);
+  const iconOf = (k) => (UNITS.find((u) => u.k === k) || {}).icon || Utensils;
+
+  const abrir = (p, cat) => { setSel({ p, cat }); setQty(1); setObs(""); setExtras([]); };
+  const addCart = () => { setCart((c) => [...c, { key: Date.now(), n: sel.p.n, p: sel.p.p, cat: sel.cat, q: qty, obs, extras }]); toast(qty + "× " + sel.p.n + " no carrinho"); setSel(null); };
+  const toggleExtra = (e) => setExtras((arr) => arr.find((x) => x.n === e.n) ? arr.filter((x) => x.n !== e.n) : [...arr, e]);
+  const removeItem = (key) => setCart((c) => c.filter((x) => x.key !== key));
+  const buscarCep = async (cep) => { const c = (cep || "").replace(/\D/g, ""); if (c.length !== 8) return; try { const r = await fetch("https://viacep.com.br/ws/" + c + "/json/"); const d = await r.json(); if (!d.erro) setCo((s) => ({ ...s, rua: d.logradouro || "", bairro: d.bairro || "", cidade: d.localidade || "", uf: d.uf || "" })); } catch (e) {} };
+  const finalizar = async () => {
+    if (cart.length === 0) return toast("Carrinho vazio");
+    if (!co.nome || !co.tel) return toast("Informe nome e telefone");
+    if (co.tipo === "entrega" && !co.cep) return toast("Informe o endereço de entrega");
+    const endereco = co.tipo === "entrega" ? (co.rua + ", " + co.num + (co.comp ? " - " + co.comp : "") + " - " + co.bairro + ", " + co.cidade + "/" + co.uf) : "Retirada na loja";
+    const itens = cart.map((x) => ({ nome: x.n, qtd: x.q, preco: x.p, extras: x.extras.map((e) => e.n), obs: x.obs }));
+    const { error } = await supabase.from("pedidos").insert({ storeId: STORE_ID, tipo: co.tipo, cliente: co.nome, telefone: co.tel, endereco, itens, total, pagamento: co.pagamento });
+    if (error) return toast("Erro: " + error.message);
+    setDone({ num: Math.floor(1000 + Math.random() * 9000), total, tipo: co.tipo, endereco, pagamento: co.pagamento }); setCart([]);
+  };
+  const enviarEncomenda = async () => {
+    if (!enc.item || !enc.nome) return toast("Informe o item e seu nome");
+    const { error } = await supabase.from("encomendas").insert({ storeId: STORE_ID, cliente: enc.nome + (enc.tel ? " (" + enc.tel + ")" : ""), item: enc.item + (enc.obs ? " — " + enc.obs : ""), quando: enc.quando ? new Date(enc.quando).toISOString() : null, status: "Aguardando pagamento", valor: 0 });
+    if (error) return toast("Erro: " + error.message);
+    setEncDone(true); setEnc({ item: "", quando: "", obs: "", nome: "", tel: "" });
+  };
+
+  if (done) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ background: CREAM }}>
+        <Card className="w-full max-w-md p-8 text-center">
+          <div className="h-16 w-16 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: SOFT }}><Check size={32} color={ORANGE} /></div>
+          <h2 className="text-2xl font-bold" style={{ color: NAVY }}>Pedido confirmado!</h2>
+          <p className="text-sm mt-1" style={{ color: "#6B7280" }}>{LOJA_NOME}</p>
+          <div className="text-left mt-5 p-4 rounded-xl" style={{ background: "#FAFAFA" }}>
+            <div className="flex justify-between text-sm"><span style={{ color: "#6B7280" }}>Pedido</span><span className="font-bold" style={{ color: NAVY }}>#{done.num}</span></div>
+            <div className="flex justify-between text-sm mt-1"><span style={{ color: "#6B7280" }}>{done.tipo === "entrega" ? "Entrega estimada" : "Retirada"}</span><span style={{ color: NAVY }}>{done.tipo === "entrega" ? "~40 min" : "~20 min"}</span></div>
+            <div className="flex justify-between text-sm mt-1"><span style={{ color: "#6B7280" }}>Pagamento</span><span style={{ color: NAVY }}>{done.pagamento}</span></div>
+            <div className="flex justify-between mt-2 pt-2 border-t" style={{ borderColor: "#EEE" }}><span className="font-semibold" style={{ color: NAVY }}>Total</span><span className="font-bold" style={{ color: ORANGE }}>{money(done.total)}</span></div>
+          </div>
+          <p className="text-xs mt-3" style={{ color: "#9AA0A6" }}>{done.tipo === "entrega" ? done.endereco : "Retire no balcão da loja."}</p>
+          <Btn className="w-full mt-5" onClick={() => { setDone(null); setTab("cardapio"); }}>Fazer novo pedido</Btn>
+          <button onClick={onExit} className="w-full mt-2 text-sm font-semibold" style={{ color: "#6B7280" }}>Sair</button>
+        </Card>
+      </div>
+    );
+  }
+
+  const tabs = [["cardapio", "Cardápio", Utensils], ["pedido", "Carrinho", ShoppingCart], ["encomenda", "Encomenda", Calendar], ["clube", "Zips", Gift]];
   return (
     <div className="min-h-screen" style={{ background: CREAM }}>
-      <header className="px-4 py-3 flex items-center justify-between" style={{ background: NAVY }}>
-        <div className="flex items-center gap-2"><ZipIcon size={32} /><span className="text-white font-bold" style={{ fontFamily: "Fredoka, sans-serif" }}>Zipão</span></div>
-        <button onClick={onExit} className="text-white/80 text-sm inline-flex items-center gap-1"><LogOut size={16} />Sair</button>
+      <header style={{ background: NAVY }}>
+        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2"><ZipIcon size={34} /><div><div className="text-white font-bold leading-tight" style={{ fontFamily: "Fredoka, sans-serif" }}>{LOJA_NOME}</div><div className="text-white/60 text-xs">Aberto agora · entrega e retirada</div></div></div>
+          <button onClick={onExit} className="text-white/80 text-sm inline-flex items-center gap-1"><LogOut size={16} /></button>
+        </div>
       </header>
+      <div className="max-w-3xl mx-auto px-4">
+        <div className="rounded-2xl mt-4 p-5 text-white" style={{ background: "linear-gradient(135deg," + ORANGE + ",#ff8a5c)" }}>
+          <div className="font-bold text-lg">Peça e ganhe Zips de volta</div>
+          <div className="text-sm text-white/90">Cashback em todo pedido · entrega rápida na sua casa.</div>
+        </div>
+      </div>
       <div className="max-w-3xl mx-auto p-4">
         <div className="flex gap-2 mb-4">
-          {tabs.map(([k, l, I]) => <button key={k} onClick={() => setTab(k)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold inline-flex items-center justify-center gap-2" style={tab === k ? { background: ORANGE, color: "#fff" } : { background: "#fff", color: NAVY, border: "1px solid #E8E8E8" }}><I size={16} />{l}</button>)}
+          {tabs.map(([k, l, I]) => <button key={k} onClick={() => setTab(k)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold inline-flex items-center justify-center gap-2 relative" style={tab === k ? { background: ORANGE, color: "#fff" } : { background: "#fff", color: NAVY, border: "1px solid #E8E8E8" }}><I size={16} />{l}{k === "pedido" && count > 0 && <span className="absolute -top-1 -right-1 h-5 min-w-5 px-1 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: NAVY, color: "#fff" }}>{count}</span>}</button>)}
         </div>
+
         {tab === "cardapio" && (
-          <div className="space-y-5">
-            {UNITS.filter((u) => PRODUTOS[u.k] && u.k !== "pesagem").map((u) => (
+          <div className="space-y-6">
+            {cats.map((u) => (
               <div key={u.k}>
                 <div className="flex items-center gap-2 mb-2"><u.icon size={16} color={ORANGE} /><h3 className="font-bold" style={{ color: NAVY }}>{u.label}</h3></div>
                 <div className="grid sm:grid-cols-2 gap-3">
                   {PRODUTOS[u.k].map((p) => (
-                    <Card key={p.n} className="p-4 flex items-center justify-between">
-                      <div><div className="font-semibold text-sm" style={{ color: NAVY }}>{p.n}</div><div className="text-sm" style={{ color: ORANGE }}>{money(p.p)}</div></div>
-                      <button onClick={() => { add(p); toast(p.n + " adicionado"); }} className="h-9 w-9 rounded-xl flex items-center justify-center" style={{ background: SOFT }}><Plus size={18} color={ORANGE} /></button>
-                    </Card>
+                    <button key={p.n} onClick={() => abrir(p, u.k)} className="text-left bg-white rounded-2xl border overflow-hidden hover:shadow-md transition flex" style={{ borderColor: "#ECECEC" }}>
+                      <div className="w-24 shrink-0 flex items-center justify-center" style={{ background: "linear-gradient(135deg," + catColor(u.k) + "," + catColor(u.k) + "bb)" }}>{(() => { const I = u.icon; return <I size={30} color="rgba(255,255,255,.92)" />; })()}</div>
+                      <div className="p-3 flex-1"><div className="font-semibold text-sm" style={{ color: NAVY }}>{p.n}</div><div className="text-xs mt-0.5" style={{ color: "#9AA0A6" }}>Toque para escolher</div><div className="text-sm mt-1 font-bold" style={{ color: ORANGE }}>{money(p.p)}</div></div>
+                    </button>
                   ))}
                 </div>
               </div>
             ))}
           </div>
         )}
+
         {tab === "pedido" && (
-          <Card className="p-5">
-            <h3 className="font-bold mb-3" style={{ color: NAVY }}>Meu pedido</h3>
-            {cart.length === 0 ? <p className="text-sm text-center py-8" style={{ color: "#9AA0A6" }}>Seu carrinho está vazio.</p> : (
-              <>
-                {cart.map((x, i) => <div key={i} className="flex justify-between py-2 border-b" style={{ borderColor: "#F2F2F2" }}><span className="text-sm" style={{ color: NAVY }}>{x.n}</span><span className="text-sm" style={{ color: "#4B5563" }}>{money(x.p)}</span></div>)}
-                <div className="flex justify-between mt-4 mb-4"><span className="font-bold" style={{ color: NAVY }}>Total</span><span className="font-bold" style={{ color: NAVY }}>{money(total)}</span></div>
-                <p className="text-sm mb-2" style={{ color: "#6B7280" }}>Pagar com:</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {[["Pix", QrCode], ["Cartão online", CreditCard], ["Na entrega", Banknote], ["Usar Zips", Gift]].map(([l, I]) => (
-                    <button key={l} onClick={() => toast("Pedido confirmado via " + l)} className="p-3 rounded-xl border inline-flex items-center gap-2 text-sm font-medium" style={{ borderColor: "#E2E2E2", color: NAVY }}><I size={16} color={ORANGE} />{l}</button>
-                  ))}
+          cart.length === 0 ? <Card className="p-8 text-center"><ShoppingCart size={28} color="#D6D8DD" className="mx-auto mb-2" /><p className="text-sm" style={{ color: "#9AA0A6" }}>Seu carrinho está vazio. Escolha no cardápio.</p></Card> : (
+            <div className="space-y-4">
+              <Card className="p-5">
+                <h3 className="font-bold mb-3" style={{ color: NAVY }}>Seu pedido</h3>
+                {cart.map((x) => (
+                  <div key={x.key} className="flex items-start justify-between py-2 border-b" style={{ borderColor: "#F2F2F2" }}>
+                    <div className="text-sm"><div className="font-medium" style={{ color: NAVY }}>{x.q}× {x.n}</div>
+                      {x.extras.length > 0 && <div className="text-xs" style={{ color: "#9AA0A6" }}>+ {x.extras.map((e) => e.n).join(", ")}</div>}
+                      {x.obs && <div className="text-xs italic" style={{ color: "#9AA0A6" }}>"{x.obs}"</div>}
+                    </div>
+                    <div className="flex items-center gap-2"><span className="text-sm font-semibold" style={{ color: NAVY }}>{money(itemTotal(x))}</span><button onClick={() => removeItem(x.key)} style={{ color: "#C0392B" }}><X size={14} /></button></div>
+                  </div>
+                ))}
+                <div className="flex justify-between mt-3"><span className="font-bold" style={{ color: NAVY }}>Total</span><span className="font-bold text-lg" style={{ color: NAVY }}>{money(total)}</span></div>
+              </Card>
+              <Card className="p-5">
+                <h3 className="font-bold mb-3" style={{ color: NAVY }}>Seus dados</h3>
+                <div className="flex gap-2 mb-3">
+                  {[["entrega", "Entrega"], ["retirada", "Retirada"]].map(([k, l]) => <button key={k} onClick={() => setCo({ ...co, tipo: k })} className="flex-1 py-2 rounded-xl text-sm font-semibold" style={co.tipo === k ? { background: NAVY, color: "#fff" } : { background: "#F4F4F5", color: NAVY }}>{l}</button>)}
                 </div>
-              </>
-            )}
-          </Card>
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={co.nome} onChange={(e) => setCo({ ...co, nome: e.target.value })} placeholder="Seu nome" className="px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+                  <input value={co.tel} onChange={(e) => setCo({ ...co, tel: e.target.value })} placeholder="WhatsApp" className="px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+                </div>
+                {co.tipo === "entrega" && (
+                  <div className="mt-2">
+                    <div className="grid grid-cols-3 gap-2">
+                      <input value={co.cep} onChange={(e) => setCo({ ...co, cep: e.target.value })} onBlur={(e) => buscarCep(e.target.value)} placeholder="CEP" className="col-span-2 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+                      <input value={co.num} onChange={(e) => setCo({ ...co, num: e.target.value })} placeholder="Nº" className="px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+                    </div>
+                    <input value={co.rua} readOnly placeholder="Rua (pelo CEP)" className="w-full mt-2 px-3 py-2.5 rounded-xl border text-sm" style={{ borderColor: "#EEE", background: "#FAFAFA", color: "#4B5563" }} />
+                    <div className="grid grid-cols-3 gap-2 mt-2">
+                      <input value={co.bairro} readOnly placeholder="Bairro" className="px-3 py-2.5 rounded-xl border text-sm" style={{ borderColor: "#EEE", background: "#FAFAFA", color: "#4B5563" }} />
+                      <input value={co.cidade} readOnly placeholder="Cidade" className="px-3 py-2.5 rounded-xl border text-sm" style={{ borderColor: "#EEE", background: "#FAFAFA", color: "#4B5563" }} />
+                      <input value={co.uf} readOnly placeholder="UF" className="px-3 py-2.5 rounded-xl border text-sm" style={{ borderColor: "#EEE", background: "#FAFAFA", color: "#4B5563" }} />
+                    </div>
+                    <input value={co.comp} onChange={(e) => setCo({ ...co, comp: e.target.value })} placeholder="Complemento (apto, bloco...)" className="w-full mt-2 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+                  </div>
+                )}
+                <div className="text-sm font-semibold mt-4 mb-2" style={{ color: NAVY }}>Pagamento</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {[["Pix", QrCode], ["Cartão na entrega", CreditCard], ["Dinheiro", Banknote], ["Usar Zips", Gift]].map(([l, I]) => <button key={l} onClick={() => setCo({ ...co, pagamento: l })} className="p-2.5 rounded-xl border inline-flex items-center gap-2 text-sm font-medium" style={co.pagamento === l ? { borderColor: ORANGE, background: SOFT, color: NAVY } : { borderColor: "#E2E2E2", color: NAVY }}><I size={15} color={ORANGE} />{l}</button>)}
+                </div>
+                <Btn className="w-full mt-4" icon={Check} onClick={finalizar}>Finalizar pedido · {money(total)}</Btn>
+              </Card>
+            </div>
+          )
         )}
+
+        {tab === "encomenda" && (
+          encDone ? <Card className="p-8 text-center"><div className="h-14 w-14 rounded-full flex items-center justify-center mx-auto mb-3" style={{ background: SOFT }}><Check size={26} color={ORANGE} /></div><h3 className="font-bold" style={{ color: NAVY }}>Encomenda solicitada!</h3><p className="text-sm mt-1" style={{ color: "#6B7280" }}>{LOJA_NOME} vai confirmar com você.</p><Btn variant="ghost" className="mt-4" onClick={() => setEncDone(false)}>Fazer outra</Btn></Card>
+            : <Card className="p-5">
+              <h3 className="font-bold mb-1" style={{ color: NAVY }}>Fazer uma encomenda</h3>
+              <p className="text-sm mb-4" style={{ color: "#6B7280" }}>Bolos, salgados para festa, pedidos especiais.</p>
+              <label className="text-sm font-medium" style={{ color: NAVY }}>O que você quer encomendar?</label>
+              <input value={enc.item} onChange={(e) => setEnc({ ...enc, item: e.target.value })} placeholder="Ex.: Bolo 2kg de chocolate" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+              <label className="text-sm font-medium" style={{ color: NAVY }}>Para quando?</label>
+              <input value={enc.quando} onChange={(e) => setEnc({ ...enc, quando: e.target.value })} type="datetime-local" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+              <label className="text-sm font-medium" style={{ color: NAVY }}>Detalhes</label>
+              <input value={enc.obs} onChange={(e) => setEnc({ ...enc, obs: e.target.value })} placeholder="Recheio, escrita no bolo, etc." className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+              <div className="grid grid-cols-2 gap-2">
+                <input value={enc.nome} onChange={(e) => setEnc({ ...enc, nome: e.target.value })} placeholder="Seu nome" className="px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+                <input value={enc.tel} onChange={(e) => setEnc({ ...enc, tel: e.target.value })} placeholder="WhatsApp" className="px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+              </div>
+              <Btn className="w-full mt-4" icon={Calendar} onClick={enviarEncomenda}>Solicitar encomenda</Btn>
+            </Card>
+        )}
+
         {tab === "clube" && (
           <Card className="p-6 text-center">
             <div className="h-14 w-14 rounded-2xl flex items-center justify-center mx-auto mb-3" style={{ background: SOFT }}><Gift size={26} color={ORANGE} /></div>
             <div className="text-sm" style={{ color: "#6B7280" }}>Seu saldo no Clube Zip</div>
             <div className="text-4xl font-bold my-1" style={{ color: NAVY }}>320 <span className="text-lg" style={{ color: ORANGE }}>Zips</span></div>
-            <p className="text-sm" style={{ color: "#9AA0A6" }}>Equivale a {money(320)} em compras. Você ganha 5% de cashback a cada pedido.</p>
+            <p className="text-sm" style={{ color: "#9AA0A6" }}>Equivale a {money(320)} em compras. Você ganha cashback a cada pedido.</p>
           </Card>
         )}
       </div>
+
+      {sel && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4" style={{ background: "rgba(26,33,54,.55)" }}>
+          <Card className="w-full sm:max-w-md p-0 overflow-hidden rounded-t-2xl sm:rounded-2xl">
+            <div className="h-40 flex items-center justify-center relative" style={{ background: "linear-gradient(135deg," + catColor(sel.cat) + "," + catColor(sel.cat) + "bb)" }}>
+              {(() => { const I = iconOf(sel.cat); return <I size={56} color="rgba(255,255,255,.92)" />; })()}
+              <button onClick={() => setSel(null)} className="absolute top-3 right-3 h-8 w-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,.3)" }}><X size={18} color="#fff" /></button>
+            </div>
+            <div className="p-5">
+              <div className="flex items-center justify-between"><h3 className="font-bold text-lg" style={{ color: NAVY }}>{sel.p.n}</h3><span className="font-bold" style={{ color: ORANGE }}>{money(sel.p.p)}</span></div>
+              <p className="text-sm mt-1" style={{ color: "#9AA0A6" }}>Feito na hora. Personalize do seu jeito.</p>
+              <div className="mt-4"><div className="text-sm font-semibold mb-2" style={{ color: NAVY }}>Quer adicionar algo?</div>
+                <div className="space-y-2">{EXTRAS_SUG.map((e) => { const on = extras.find((x) => x.n === e.n); return (
+                  <button key={e.n} onClick={() => toggleExtra(e)} className="w-full flex items-center justify-between p-2.5 rounded-xl border text-sm" style={on ? { borderColor: ORANGE, background: SOFT } : { borderColor: "#E2E2E2" }}><span style={{ color: NAVY }}>{e.n}</span><span style={{ color: ORANGE }}>+{money(e.p)}</span></button>
+                ); })}</div>
+              </div>
+              <div className="mt-4"><div className="text-sm font-semibold mb-1" style={{ color: NAVY }}>Observação</div>
+                <input value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: sem cebola, bem passado..." className="w-full px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+              </div>
+              <div className="flex items-center gap-4 mt-4">
+                <div className="flex items-center gap-3">
+                  <button onClick={() => setQty((q) => Math.max(1, q - 1))} className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: "#F1F2F4" }}><Minus size={18} /></button>
+                  <span className="text-xl font-bold w-8 text-center" style={{ color: NAVY }}>{qty}</span>
+                  <button onClick={() => setQty((q) => q + 1)} className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: SOFT }}><Plus size={18} color={ORANGE} /></button>
+                </div>
+                <Btn className="flex-1" icon={ShoppingCart} onClick={addCart}>Adicionar {money((sel.p.p + extras.reduce((s, e) => s + e.p, 0)) * qty)}</Btn>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
