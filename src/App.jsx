@@ -457,8 +457,17 @@ function PDVLogin({ onBack, onEnter }) {
 /* ============================ Login (hub) ============================ */
 function Login({ onEnter, onDono }) {
   const [role, setRole] = useState(null);
-  const [email, setEmail] = useState("dono@zipao.com.br");
-  const [senha, setSenha] = useState("••••••••");
+  const [email, setEmail] = useState("paulomendescaminha@gmail.com");
+  const [senha, setSenha] = useState("");
+  const [erro, setErro] = useState("");
+  const [carregando, setCarregando] = useState(false);
+  const entrar = async () => {
+    setErro(""); setCarregando(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password: senha });
+    setCarregando(false);
+    if (error) { setErro("E-mail ou senha incorretos."); return; }
+    onDono();
+  };
   const roles = [
     { k: "dono", label: "Dono / Gestor", desc: "Painel completo do ERP", icon: ShieldCheck },
     { k: "pdv", label: "Atendente (PDV)", desc: "Frente de caixa e comandas", icon: ShoppingCart },
@@ -499,8 +508,9 @@ function Login({ onEnter, onDono }) {
               <label className="text-sm font-medium" style={{ color: NAVY }}>E-mail</label>
               <input value={email} onChange={(e) => setEmail(e.target.value)} className="w-full mt-1 mb-4 px-4 py-3 rounded-xl border outline-none" style={{ borderColor: "#E2E2E2" }} />
               <label className="text-sm font-medium" style={{ color: NAVY }}>Senha</label>
-              <input value={senha} onChange={(e) => setSenha(e.target.value)} type="password" className="w-full mt-1 mb-5 px-4 py-3 rounded-xl border outline-none" style={{ borderColor: "#E2E2E2" }} />
-              <Btn onClick={onDono} className="w-full" icon={ShieldCheck}>Entrar no painel</Btn>
+              <input value={senha} onChange={(e) => setSenha(e.target.value)} type="password" placeholder="Sua senha" className="w-full mt-1 mb-3 px-4 py-3 rounded-xl border outline-none" style={{ borderColor: "#E2E2E2" }} />
+              {erro && <p className="text-sm mb-3" style={{ color: "#C0392B" }}>{erro}</p>}
+              <Btn onClick={entrar} className="w-full" icon={ShieldCheck}>{carregando ? "Entrando..." : "Entrar no painel"}</Btn>
               <button onClick={() => setRole(null)} className="w-full mt-3 text-sm font-semibold" style={{ color: "#6B7280" }}>Trocar perfil</button>
             </>
           )}
@@ -820,37 +830,172 @@ function PayModal({ total, onClose, onDone }) {
   );
 }
 
-function Estoque() {
+function Estoque({ toast }) {
+  const [insumos, setInsumos] = useState([]);
+  const [produtos, setProdutos] = useState([]);
+  const [fichas, setFichas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [formIns, setFormIns] = useState(null);
+  const [formFicha, setFormFicha] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    const [ri, rp] = await Promise.all([
+      supabase.from("ingredients").select("*").eq("storeId", STORE_ID).order("name"),
+      supabase.from("products").select("id,name").eq("storeId", STORE_ID).order("name"),
+    ]);
+    if (ri.error) toast("Erro: " + ri.error.message); else setInsumos(ri.data || []);
+    if (rp.data) setProdutos(rp.data);
+    const ids = (rp.data || []).map((p) => p.id);
+    if (ids.length) {
+      const rr = await supabase.from("recipe_items").select("*").in("productId", ids);
+      setFichas(rr.data || []);
+    } else setFichas([]);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const nomeIns = (id) => (insumos.find((i) => i.id === id) || {}).name || "?";
+  const nomeProd = (id) => (produtos.find((p) => p.id === id) || {}).name || "?";
+
+  // ---- Insumos ----
+  const salvarIns = async () => {
+    const f = formIns;
+    if (!f.name) return toast("Informe o nome");
+    const payload = { name: f.name, unit: f.unit, avgPrice: Number(f.avgPrice) || 0, stockQty: Number(f.stockQty) || 0, minStock: Number(f.minStock) || 0, dailyConsumption: Number(f.dailyConsumption) || 0, isPackaging: !!f.isPackaging };
+    let error;
+    if (f.id) ({ error } = await supabase.from("ingredients").update({ ...payload, updatedAt: new Date().toISOString() }).eq("id", f.id));
+    else ({ error } = await supabase.from("ingredients").insert({ ...payload, storeId: STORE_ID }));
+    if (error) return toast("Erro: " + error.message);
+    toast(f.id ? "Insumo atualizado" : "Insumo cadastrado"); setFormIns(null); load();
+  };
+  const excluirIns = async (i) => {
+    if (!window.confirm('Excluir "' + i.name + '"?')) return;
+    const { error } = await supabase.from("ingredients").delete().eq("id", i.id);
+    if (error) return toast("Erro: " + error.message + " (talvez esteja em uso numa ficha)");
+    toast("Insumo excluído"); load();
+  };
+
+  // ---- Fichas técnicas ----
+  const abrirFicha = () => setFormFicha({ productId: produtos[0]?.id || "", linhas: [{ ingredientId: insumos[0]?.id || "", quantity: "", unit: "" }] });
+  const salvarFicha = async () => {
+    const f = formFicha;
+    if (!f.productId) return toast("Escolha o produto");
+    const rows = f.linhas.filter((l) => l.ingredientId && l.quantity).map((l) => ({
+      productId: f.productId, ingredientId: l.ingredientId, quantity: Number(l.quantity), unit: l.unit || (insumos.find((i) => i.id === l.ingredientId) || {}).unit,
+    }));
+    if (!rows.length) return toast("Adicione ao menos um insumo");
+    const { error } = await supabase.from("recipe_items").upsert(rows, { onConflict: "productId,ingredientId" });
+    if (error) return toast("Erro: " + error.message);
+    toast("Ficha técnica salva"); setFormFicha(null); load();
+  };
+  const excluirLinha = async (l) => {
+    const { error } = await supabase.from("recipe_items").delete().eq("id", l.id);
+    if (error) return toast("Erro: " + error.message);
+    load();
+  };
+
+  const fichasPorProduto = produtos.map((p) => ({ p, linhas: fichas.filter((f) => f.productId === p.id) })).filter((x) => x.linhas.length);
+
   return (
-    <Section title="Estoque & fichas técnicas" desc="Preço médio de mercado, consumo diário e baixa automática por ficha técnica.">
-      <Card className="p-0 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead><tr style={{ background: CREAM }}>{["Insumo", "Preço médio", "Estoque", "Mín.", "Consumo/dia", "Status"].map((h) => <th key={h} className="text-left font-semibold px-4 py-3" style={{ color: NAVY }}>{h}</th>)}</tr></thead>
-            <tbody>
-              {INSUMOS.map((i) => { const low = i.estoque <= i.min; return (
-                <tr key={i.n} className="border-t" style={{ borderColor: "#F0F0F0" }}>
-                  <td className="px-4 py-3 font-medium" style={{ color: NAVY }}>{i.n}</td>
-                  <td className="px-4 py-3" style={{ color: "#4B5563" }}>{money(i.precoMed)}/{i.un}</td>
-                  <td className="px-4 py-3" style={{ color: "#4B5563" }}>{i.estoque} {i.un}</td>
-                  <td className="px-4 py-3" style={{ color: "#9AA0A6" }}>{i.min}</td>
-                  <td className="px-4 py-3" style={{ color: "#4B5563" }}>{i.consumoDia} {i.un}</td>
-                  <td className="px-4 py-3">{low ? <Pill tone="red">Repor</Pill> : <Pill tone="green">OK</Pill>}</td>
-                </tr>
-              ); })}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-      <h3 className="font-bold mt-6 mb-3" style={{ color: NAVY }}>Fichas técnicas (formação de produto + embalagem)</h3>
-      <div className="grid md:grid-cols-3 gap-4">
-        {FICHAS.map((f) => (
-          <Card key={f.prod} className="p-5">
-            <div className="flex items-center gap-2 mb-3"><Boxes size={18} color={ORANGE} /><span className="font-semibold text-sm" style={{ color: NAVY }}>{f.prod}</span></div>
-            <ul className="space-y-2">{f.itens.map((it) => <li key={it} className="text-sm flex items-center gap-2" style={{ color: "#4B5563" }}><Check size={14} color="#1B7F4B" />{it}</li>)}</ul>
-          </Card>
-        ))}
+    <Section title="Estoque & fichas técnicas" desc="Cadastre insumos e monte as fichas técnicas — tudo gravado no banco.">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-bold" style={{ color: NAVY }}>Insumos</h3>
+        <Btn size="sm" icon={Plus} onClick={() => setFormIns({ name: "", unit: "kg", avgPrice: "", stockQty: "", minStock: "", dailyConsumption: "", isPackaging: false })}>Novo insumo</Btn>
       </div>
+      {loading ? <p className="text-sm" style={{ color: "#9AA0A6" }}>Carregando...</p> : (
+        <Card className="p-0 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr style={{ background: CREAM }}>{["Insumo", "Preço médio", "Estoque", "Mín.", "Status", ""].map((h) => <th key={h} className="text-left px-4 py-3 font-semibold" style={{ color: NAVY }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {insumos.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center" style={{ color: "#9AA0A6" }}>Nenhum insumo ainda.</td></tr>}
+                {insumos.map((i) => { const low = Number(i.stockQty) <= Number(i.minStock); return (
+                  <tr key={i.id} className="border-t" style={{ borderColor: "#F0F0F0" }}>
+                    <td className="px-4 py-3 font-medium" style={{ color: NAVY }}>{i.name}{i.isPackaging ? " (embalagem)" : ""}</td>
+                    <td className="px-4 py-3" style={{ color: "#4B5563" }}>{money(Number(i.avgPrice))}/{i.unit}</td>
+                    <td className="px-4 py-3" style={{ color: "#4B5563" }}>{Number(i.stockQty)} {i.unit}</td>
+                    <td className="px-4 py-3" style={{ color: "#9AA0A6" }}>{Number(i.minStock)}</td>
+                    <td className="px-4 py-3">{low ? <Pill tone="red">Repor</Pill> : <Pill tone="green">OK</Pill>}</td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <button onClick={() => setFormIns({ id: i.id, name: i.name, unit: i.unit, avgPrice: String(i.avgPrice), stockQty: String(i.stockQty), minStock: String(i.minStock), dailyConsumption: String(i.dailyConsumption), isPackaging: i.isPackaging })} className="text-sm font-semibold mr-3" style={{ color: NAVY }}>Editar</button>
+                      <button onClick={() => excluirIns(i)} className="text-sm font-semibold" style={{ color: "#C0392B" }}>Excluir</button>
+                    </td>
+                  </tr>
+                ); })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      <div className="flex items-center justify-between mt-6 mb-3">
+        <h3 className="font-bold" style={{ color: NAVY }}>Fichas técnicas</h3>
+        <Btn size="sm" icon={Plus} onClick={abrirFicha}>Nova ficha técnica</Btn>
+      </div>
+      {fichasPorProduto.length === 0 ? <p className="text-sm" style={{ color: "#9AA0A6" }}>Nenhuma ficha técnica. Clique em "Nova ficha técnica".</p> : (
+        <div className="grid md:grid-cols-3 gap-4">
+          {fichasPorProduto.map(({ p, linhas }) => (
+            <Card key={p.id} className="p-5">
+              <div className="flex items-center gap-2 mb-3"><Boxes size={18} color={ORANGE} /><span className="font-semibold text-sm" style={{ color: NAVY }}>{p.name}</span></div>
+              <ul className="space-y-2">{linhas.map((l) => (
+                <li key={l.id} className="text-sm flex items-center justify-between" style={{ color: "#4B5563" }}>
+                  <span className="flex items-center gap-2"><Check size={14} color="#1B7F4B" />{Number(l.quantity)} {l.unit || ""} {nomeIns(l.ingredientId)}</span>
+                  <button onClick={() => excluirLinha(l)} style={{ color: "#C0392B" }}><X size={14} /></button>
+                </li>
+              ))}</ul>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {formIns && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(26,33,54,.55)" }}>
+          <Card className="w-full max-w-sm p-6">
+            <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>{formIns.id ? "Editar insumo" : "Novo insumo"}</h3><button onClick={() => setFormIns(null)}><X size={20} color="#9AA0A6" /></button></div>
+            <label className="text-sm font-medium" style={{ color: NAVY }}>Nome</label>
+            <input value={formIns.name} onChange={(e) => setFormIns({ ...formIns, name: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="text-sm font-medium" style={{ color: NAVY }}>Unidade</label>
+                <select value={formIns.unit} onChange={(e) => setFormIns({ ...formIns, unit: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm bg-white outline-none" style={{ borderColor: "#E2E2E2" }}>
+                  {["kg", "L", "un"].map((u) => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+              <div><label className="text-sm font-medium" style={{ color: NAVY }}>Preço médio</label><input value={formIns.avgPrice} onChange={(e) => setFormIns({ ...formIns, avgPrice: e.target.value })} type="number" step="0.01" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /></div>
+              <div><label className="text-sm font-medium" style={{ color: NAVY }}>Estoque</label><input value={formIns.stockQty} onChange={(e) => setFormIns({ ...formIns, stockQty: e.target.value })} type="number" step="0.001" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /></div>
+              <div><label className="text-sm font-medium" style={{ color: NAVY }}>Estoque mínimo</label><input value={formIns.minStock} onChange={(e) => setFormIns({ ...formIns, minStock: e.target.value })} type="number" step="0.001" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /></div>
+            </div>
+            <label className="flex items-center justify-between py-1"><span className="text-sm font-medium" style={{ color: NAVY }}>É embalagem?</span><Toggle on={formIns.isPackaging} onChange={(v) => setFormIns({ ...formIns, isPackaging: v })} /></label>
+            <Btn className="w-full mt-3" icon={Check} onClick={salvarIns}>{formIns.id ? "Salvar alterações" : "Cadastrar"}</Btn>
+          </Card>
+        </div>
+      )}
+
+      {formFicha && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(26,33,54,.55)" }}>
+          <Card className="w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>Nova ficha técnica</h3><button onClick={() => setFormFicha(null)}><X size={20} color="#9AA0A6" /></button></div>
+            <label className="text-sm font-medium" style={{ color: NAVY }}>Produto</label>
+            <select value={formFicha.productId} onChange={(e) => setFormFicha({ ...formFicha, productId: e.target.value })} className="w-full mt-1 mb-4 px-3 py-2.5 rounded-xl border text-sm bg-white outline-none" style={{ borderColor: "#E2E2E2" }}>
+              {produtos.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <label className="text-sm font-medium" style={{ color: NAVY }}>Insumos da receita</label>
+            <div className="space-y-2 mt-1 mb-3">
+              {formFicha.linhas.map((l, idx) => (
+                <div key={idx} className="flex gap-2">
+                  <select value={l.ingredientId} onChange={(e) => { const ls = [...formFicha.linhas]; ls[idx] = { ...ls[idx], ingredientId: e.target.value }; setFormFicha({ ...formFicha, linhas: ls }); }} className="flex-1 px-2 py-2 rounded-lg border text-sm bg-white outline-none" style={{ borderColor: "#E2E2E2" }}>
+                    {insumos.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                  </select>
+                  <input value={l.quantity} onChange={(e) => { const ls = [...formFicha.linhas]; ls[idx] = { ...ls[idx], quantity: e.target.value }; setFormFicha({ ...formFicha, linhas: ls }); }} type="number" step="0.001" placeholder="Qtd" className="w-20 px-2 py-2 rounded-lg border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+                  <button onClick={() => setFormFicha({ ...formFicha, linhas: formFicha.linhas.filter((_, i) => i !== idx) })} className="px-2" style={{ color: "#C0392B" }}><X size={16} /></button>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setFormFicha({ ...formFicha, linhas: [...formFicha.linhas, { ingredientId: insumos[0]?.id || "", quantity: "", unit: "" }] })} className="text-sm font-semibold mb-4 inline-flex items-center gap-1" style={{ color: ORANGE }}><Plus size={14} />Adicionar insumo</button>
+            <Btn className="w-full" icon={Check} onClick={salvarFicha}>Salvar ficha técnica</Btn>
+          </Card>
+        </div>
+      )}
     </Section>
   );
 }
@@ -1610,7 +1755,7 @@ function Admin({ onExit, startMod, operador }) {
           <span className="ml-auto text-xs px-2 py-1 rounded-md" style={{ background: "rgba(255,255,255,.1)", color: "#fff" }}>ERP</span>
         </div>
         <div className="flex-1 overflow-y-auto">{NavList}</div>
-        <button onClick={onExit} className="m-3 p-3 rounded-xl text-sm font-medium inline-flex items-center gap-2" style={{ color: "rgba(255,255,255,.7)", background: "rgba(255,255,255,.06)" }}><LogOut size={16} />Sair</button>
+        <button onClick={async () => { await supabase.auth.signOut(); onExit(); }} className="m-3 p-3 rounded-xl text-sm font-medium inline-flex items-center gap-2" style={{ color: "rgba(255,255,255,.7)", background: "rgba(255,255,255,.06)" }}><LogOut size={16} />Sair</button>
       </aside>
 
       {/* sidebar mobile */}
