@@ -510,6 +510,7 @@ function Login({ onEnter, onDono }) {
     const { error } = await supabase.auth.signInWithPassword({ email, password: senha });
     setCarregando(false);
     if (error) { setErro("E-mail ou senha incorretos."); return; }
+    unlockAudio(); beep();
     onDono();
   };
   const roles = [
@@ -2103,6 +2104,23 @@ function Admin({ onExit, startMod, operador }) {
   const toast = (m) => { setToastMsg(m); setTimeout(() => setToastMsg(null), 2600); };
   const Active = NAV.find((n) => n.k === mod).C;
 
+  const liveOrders = useLive();
+  useAudioAutoUnlock();
+  const seenRef = useRef(null);
+  const [alerta, setAlerta] = useState(null);
+  useEffect(() => {
+    const ids = new Set(liveOrders.map((o) => o.id));
+    if (seenRef.current === null) {
+      seenRef.current = ids;
+      const pend = liveOrders.filter((o) => o.status === "novo");
+      if (pend.length) { unlockAudio(); beep(); setAlerta({ cliente: pend[0].cliente, count: pend.length }); }
+      return;
+    }
+    const novos = liveOrders.filter((o) => !seenRef.current.has(o.id));
+    seenRef.current = ids;
+    if (novos.length) { unlockAudio(); beep(); setAlerta({ cliente: novos[0].cliente, count: novos.length }); }
+  }, [liveOrders]);
+
   const NavList = (
     <nav className="p-3 space-y-0.5">
       {NAV.map((n) => { const on = mod === n.k; const I = n.icon; return (
@@ -2115,6 +2133,16 @@ function Admin({ onExit, startMod, operador }) {
 
   return (
     <div className="min-h-screen flex" style={{ background: "#F7F7F5" }}>
+      {alerta && (
+        <div className="fixed top-0 left-0 right-0 z-[60] px-4 py-3 flex items-center justify-between shadow-lg" style={{ background: ORANGE, color: "#fff" }}>
+          <div className="flex items-center gap-2 font-semibold"><BellIcon size={18} />Novo pedido de {alerta.cliente}!{alerta.count > 1 ? " (+" + (alerta.count - 1) + " outros)" : ""}</div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setMod("pedidos"); setAlerta(null); }} className="px-3 py-1.5 rounded-lg text-sm font-bold" style={{ background: "#fff", color: ORANGE }}>Ver pedidos</button>
+            <button onClick={() => { unlockAudio(); beep(); }} className="h-8 w-8 rounded-lg flex items-center justify-center" style={{ background: "rgba(255,255,255,.2)" }} title="Tocar som"><Volume2 size={16} color="#fff" /></button>
+            <button onClick={() => setAlerta(null)} className="h-8 w-8 rounded-lg flex items-center justify-center" style={{ background: "rgba(255,255,255,.2)" }}><X size={16} color="#fff" /></button>
+          </div>
+        </div>
+      )}
       {/* sidebar desktop */}
       <aside className="hidden md:flex md:flex-col w-64 shrink-0" style={{ background: NAVY }}>
         <div className="p-4 flex items-center gap-2 border-b" style={{ borderColor: "rgba(255,255,255,.08)" }}>
