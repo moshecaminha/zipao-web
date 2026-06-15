@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, ShoppingCart, Boxes, ClipboardList, Printer, Calendar, Truck,
   Users, Gift, Wallet, MessageCircle, UserCog, Plug, BarChart3, Utensils, Coffee,
@@ -6,6 +6,7 @@ import {
   CreditCard, QrCode, Banknote, AlertTriangle, ArrowRight, Upload, CheckCircle2,
   Circle, Clock, MapPin, LogOut, ShieldCheck, TrendingUp, Power, Menu, Store,
   ChevronRight, ChevronLeft, Smartphone, Receipt, Zap, Hash, User, PlayCircle, Star, Lock, Delete,
+  ChefHat, Volume2, VolumeX, Bell as BellIcon, Navigation, Bike, ThumbsUp, ThumbsDown, Timer, Flame,
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -1354,10 +1355,219 @@ function ClienteApp({ onExit, toast }) {
   );
 }
 
+/* ============================ Operação ao vivo (Cozinha / Pedidos / Entregador) ============================ */
+let _audioCtx = null;
+function unlockAudio() {
+  if (!_audioCtx) { try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  if (_audioCtx && _audioCtx.state === "suspended") _audioCtx.resume();
+}
+function beep() {
+  if (!_audioCtx) return;
+  [0, 0.18].forEach((delay) => {
+    const o = _audioCtx.createOscillator(), g = _audioCtx.createGain();
+    o.connect(g); g.connect(_audioCtx.destination);
+    o.type = "sine"; o.frequency.value = 880;
+    const t = _audioCtx.currentTime + delay;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    o.start(t); o.stop(t + 0.16);
+  });
+}
+
+const STORE_COORD = { lat: -23.5895, lng: -46.6347 };
+function distKm(a, b) {
+  const R = 6371, dLat = (b.lat - a.lat) * Math.PI / 180, dLng = (b.lng - a.lng) * Math.PI / 180;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+const _now0 = Date.now();
+const seedOrders = [
+  { id: "o1", numero: 41, tipo: "mesa", mesa: "5", cliente: "Marina", status: "producao", createdAt: _now0 - 300000, itens: [{ n: "Pizza calabresa", q: 1 }, { n: "Refri lata", q: 2 }] },
+  { id: "o2", numero: 42, tipo: "delivery", cliente: "Pedro Santos", status: "pronto", createdAt: _now0 - 540000, bairro: "Vila Mariana", endereco: "Rua Domingos de Morais, 1200 - São Paulo", lat: -23.5896, lng: -46.6388, itens: [{ n: "Zip Burger", q: 2 }, { n: "Batata", q: 1 }] },
+  { id: "o3", numero: 43, tipo: "whatsapp", cliente: "Camila", status: "novo", createdAt: _now0 - 60000, itens: [{ n: "Bolo fatia", q: 3 }] },
+  { id: "o4", numero: 44, tipo: "delivery", cliente: "Ana Lima", status: "pronto", createdAt: _now0 - 200000, bairro: "Saúde", endereco: "Av. Jabaquara, 500 - São Paulo", lat: -23.6200, lng: -46.6400, itens: [{ n: "Pão de metro", q: 1 }] },
+];
+const liveStore = (function () {
+  let orders = seedOrders.slice(), subs = [], started = false, seq = 45;
+  const emit = () => subs.forEach((f) => f(orders.slice()));
+  const novoPedido = () => {
+    const nomes = ["João", "Lúcia", "Bruno", "Carla", "Diego", "Patrícia", "Rafael"];
+    const tipos = ["mesa", "delivery", "whatsapp", "avulso"];
+    const pool = [{ n: "Pizza margherita", q: 1 }, { n: "Zip Burger", q: 2 }, { n: "Café", q: 1 }, { n: "Coxinha", q: 4 }, { n: "Pão francês", q: 6 }, { n: "Torta", q: 1 }];
+    const ends = [{ e: "Rua Vergueiro, 1000 - São Paulo", b: "Liberdade", lat: -23.571, lng: -46.639 }, { e: "Av. Paulista, 900 - São Paulo", b: "Bela Vista", lat: -23.563, lng: -46.654 }, { e: "Rua do Ipiranga, 200 - São Paulo", b: "Ipiranga", lat: -23.591, lng: -46.610 }];
+    const tipo = tipos[Math.floor(Math.random() * tipos.length)];
+    const o = { id: "o" + seq, numero: seq, tipo, cliente: nomes[Math.floor(Math.random() * nomes.length)], status: "novo", createdAt: Date.now(), itens: [pool[Math.floor(Math.random() * pool.length)]] };
+    if (tipo === "mesa") o.mesa = String(2 + Math.floor(Math.random() * 15));
+    if (tipo === "delivery") { const a = ends[Math.floor(Math.random() * ends.length)]; o.endereco = a.e; o.bairro = a.b; o.lat = a.lat; o.lng = a.lng; }
+    seq++; orders = [o, ...orders]; emit();
+  };
+  return {
+    get: () => orders.slice(),
+    sub: (f) => { subs.push(f); return () => { subs = subs.filter((s) => s !== f); }; },
+    update: (id, patch) => { orders = orders.map((o) => o.id === id ? { ...o, ...patch } : o); emit(); },
+    startSim: () => { if (started) return; started = true; setInterval(novoPedido, 25000); },
+  };
+})();
+function useLive() {
+  const [orders, setOrders] = useState(liveStore.get());
+  useEffect(() => { const un = liveStore.sub(setOrders); liveStore.startSim(); return un; }, []);
+  return orders;
+}
+function useNewOrderSound(orders, enabled) {
+  const seen = useRef(null);
+  useEffect(() => {
+    const ids = new Set(orders.map((o) => o.id));
+    if (seen.current === null) { seen.current = ids; return; }
+    let isNew = false; ids.forEach((id) => { if (!seen.current.has(id)) isNew = true; });
+    seen.current = ids;
+    if (isNew && enabled) beep();
+  }, [orders, enabled]);
+}
+function useClock() {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  return now;
+}
+const fmtTimer = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+function TipoPill({ tipo, mesa }) {
+  const map = { mesa: ["navy", "Mesa " + (mesa || "")], delivery: ["orange", "Delivery"], avulso: ["gray", "Balcão"], whatsapp: ["green", "WhatsApp"] };
+  const [tone, txt] = map[tipo] || ["gray", tipo];
+  return <Pill tone={tone}>{txt}</Pill>;
+}
+function SoundBtn({ on, onToggle }) {
+  return <button onClick={onToggle} className="rounded-xl font-semibold inline-flex items-center gap-2 px-3 py-2 text-sm" style={{ background: on ? SOFT : NAVY, color: on ? ORANGE : "#fff" }}>{on ? <Volume2 size={16} /> : <VolumeX size={16} />}{on ? "Som ligado" : "Ativar som"}</button>;
+}
+
+function Cozinha() {
+  const orders = useLive();
+  const now = useClock();
+  const [sound, setSound] = useState(false);
+  useNewOrderSound(orders, sound);
+  const toggle = () => { if (!sound) { unlockAudio(); beep(); setSound(true); } else setSound(false); };
+  const cols = [["novo", "Novos", "#C0392B", Flame], ["producao", "Em produção", "#D35400", ChefHat], ["pronto", "Prontos", "#1B7F4B", Check]];
+  const next = { novo: "producao", producao: "pronto" };
+  const label = { novo: "Iniciar produção", producao: "Marcar pronto" };
+  return (
+    <Section title="Cozinha (KDS)" desc="Pedidos em tempo real. Toque para avançar a produção." right={<SoundBtn on={sound} onToggle={toggle} />}>
+      <div className="grid md:grid-cols-3 gap-4">
+        {cols.map(([st, titulo, cor, Ic]) => {
+          const list = orders.filter((o) => o.status === st);
+          return (
+            <div key={st}>
+              <div className="flex items-center justify-between mb-2"><h3 className="font-bold inline-flex items-center gap-2" style={{ color: NAVY }}><Ic size={16} color={cor} />{titulo}</h3><span className="text-sm font-bold" style={{ color: cor }}>{list.length}</span></div>
+              <div className="space-y-3">
+                {list.length === 0 && <div className="text-sm rounded-xl p-4 text-center" style={{ background: "#FAFAFA", color: "#9AA0A6" }}>Vazio</div>}
+                {list.map((o) => { const late = now - o.createdAt > 600000; return (
+                  <Card key={o.id} className="p-4" style={{ borderLeft: "4px solid " + cor }}>
+                    <div className="flex items-center justify-between">
+                      <div className="font-bold" style={{ color: NAVY }}>#{o.numero} · {o.cliente}</div>
+                      <span className="text-xs font-semibold inline-flex items-center gap-1" style={{ color: late ? "#C0392B" : "#9AA0A6" }}><Timer size={13} />{fmtTimer(now - o.createdAt)}</span>
+                    </div>
+                    <div className="mt-1 mb-3"><TipoPill tipo={o.tipo} mesa={o.mesa} /></div>
+                    <ul className="text-sm space-y-1 mb-3" style={{ color: "#4B5563" }}>{o.itens.map((it, i) => <li key={i}>{it.q}× {it.n}</li>)}</ul>
+                    {st !== "pronto"
+                      ? <Btn size="sm" className="w-full" icon={st === "novo" ? Flame : Check} onClick={() => liveStore.update(o.id, { status: next[st] })}>{label[st]}</Btn>
+                      : (o.tipo === "delivery"
+                        ? <div className="text-xs text-center py-2 rounded-lg" style={{ background: SOFT, color: ORANGE }}>Aguardando entregador</div>
+                        : <Btn size="sm" variant="ghost" className="w-full" icon={Check} onClick={() => liveStore.update(o.id, { status: "concluido" })}>Concluir</Btn>)}
+                  </Card>
+                ); })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Section>
+  );
+}
+
+function PedidosVivo({ toast }) {
+  const orders = useLive();
+  const now = useClock();
+  const [sound, setSound] = useState(false);
+  useNewOrderSound(orders, sound);
+  const toggle = () => { if (!sound) { unlockAudio(); beep(); setSound(true); } else setSound(false); };
+  const ativos = orders.filter((o) => o.status !== "concluido");
+  const stInfo = { novo: ["Novo", "red"], producao: ["Em produção", "orange"], pronto: ["Pronto", "green"], entrega: ["Saiu p/ entrega", "blue"] };
+  return (
+    <Section title="Pedidos ao vivo" desc="Acompanhe os pedidos chegando e cobre a cozinha quando atrasar." right={<SoundBtn on={sound} onToggle={toggle} />}>
+      <div className="space-y-2">
+        {ativos.length === 0 && <Card className="p-8 text-center"><span className="text-sm" style={{ color: "#9AA0A6" }}>Nenhum pedido ativo.</span></Card>}
+        {ativos.map((o) => { const [t, tone] = stInfo[o.status] || ["", "gray"]; const late = now - o.createdAt > 480000; return (
+          <Card key={o.id} className="p-4 flex items-center justify-between gap-3 flex-wrap" style={o.urgent ? { borderColor: ORANGE, borderWidth: 2 } : {}}>
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: SOFT }}><Receipt size={18} color={ORANGE} /></div>
+              <div>
+                <div className="font-bold inline-flex items-center gap-2" style={{ color: NAVY }}>#{o.numero} · {o.cliente} <TipoPill tipo={o.tipo} mesa={o.mesa} /></div>
+                <div className="text-xs" style={{ color: "#9AA0A6" }}>{o.itens.map((it) => it.q + "× " + it.n).join(", ")}</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-xs inline-flex items-center gap-1" style={{ color: late ? "#C0392B" : "#9AA0A6" }}><Timer size={13} />{fmtTimer(now - o.createdAt)}</span>
+              <Pill tone={tone}>{t}</Pill>
+              {(o.status === "novo" || o.status === "producao") && <Btn size="sm" variant="ghost" icon={BellIcon} onClick={() => { liveStore.update(o.id, { urgent: true }); toast("Cozinha avisada sobre #" + o.numero); }}>Cobrar</Btn>}
+            </div>
+          </Card>
+        ); })}
+      </div>
+    </Section>
+  );
+}
+
+function Entregador({ toast }) {
+  const orders = useLive();
+  const [recusados, setRecusados] = useState([]);
+  const [sound, setSound] = useState(false);
+  const disp = orders.filter((o) => o.tipo === "delivery" && o.status === "pronto" && !recusados.includes(o.id))
+    .map((o) => ({ ...o, km: o.lat ? distKm(STORE_COORD, { lat: o.lat, lng: o.lng }) : 0 }))
+    .sort((a, b) => a.km - b.km);
+  const minhas = orders.filter((o) => o.status === "entrega");
+  useNewOrderSound(disp, sound);
+  const toggle = () => { if (!sound) { unlockAudio(); beep(); setSound(true); } else setSound(false); };
+  const maps = (o) => window.open("https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(o.endereco), "_blank");
+  return (
+    <Section title="Entregador" desc="Aceite as entregas, veja o endereço e abra a rota no Google Maps." right={<SoundBtn on={sound} onToggle={toggle} />}>
+      {minhas.length > 0 && (<>
+        <h3 className="font-bold mb-2" style={{ color: NAVY }}>Minhas entregas</h3>
+        <div className="space-y-2 mb-5">
+          {minhas.map((o) => (
+            <Card key={o.id} className="p-4">
+              <div className="flex items-center justify-between"><div className="font-bold" style={{ color: NAVY }}>#{o.numero} · {o.cliente}</div><Pill tone="blue">A caminho</Pill></div>
+              <div className="text-sm mt-1 flex items-center gap-1" style={{ color: "#6B7280" }}><MapPin size={14} />{o.endereco}</div>
+              <div className="flex gap-2 mt-3"><Btn size="sm" icon={Navigation} onClick={() => maps(o)}>Rota no Maps</Btn><Btn size="sm" variant="ghost" icon={Check} onClick={() => { liveStore.update(o.id, { status: "concluido" }); toast("Entrega #" + o.numero + " concluída"); }}>Entregue</Btn></div>
+            </Card>
+          ))}
+        </div>
+      </>)}
+      <h3 className="font-bold mb-2" style={{ color: NAVY }}>Disponíveis (mais perto primeiro)</h3>
+      <div className="space-y-2">
+        {disp.length === 0 && <Card className="p-8 text-center"><span className="text-sm" style={{ color: "#9AA0A6" }}>Nenhuma entrega disponível agora.</span></Card>}
+        {disp.map((o) => (
+          <Card key={o.id} className="p-4">
+            <div className="flex items-center justify-between"><div className="font-bold" style={{ color: NAVY }}>#{o.numero} · {o.cliente}</div><span className="text-sm font-bold inline-flex items-center gap-1" style={{ color: ORANGE }}><Bike size={14} />{o.km.toFixed(1)} km</span></div>
+            <div className="text-sm mt-1 flex items-center gap-1" style={{ color: "#6B7280" }}><MapPin size={14} />{o.endereco} · {o.bairro}</div>
+            <div className="text-xs mt-1" style={{ color: "#9AA0A6" }}>{o.itens.map((it) => it.q + "× " + it.n).join(", ")}</div>
+            <div className="flex gap-2 mt-3">
+              <Btn size="sm" icon={ThumbsUp} onClick={() => { liveStore.update(o.id, { status: "entrega" }); toast("Entrega #" + o.numero + " aceita"); }}>Aceitar</Btn>
+              <Btn size="sm" variant="ghost" icon={ThumbsDown} onClick={() => setRecusados((r) => [...r, o.id])}>Recusar</Btn>
+              <Btn size="sm" variant="ghost" icon={Navigation} onClick={() => maps(o)}>Rota</Btn>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 /* ============================ Shell admin ============================ */
 const NAV = [
   { k: "dashboard", label: "Visão geral", icon: LayoutDashboard, C: Dashboard },
   { k: "pdv", label: "PDV / Frente de caixa", icon: ShoppingCart, C: PDV },
+  { k: "cozinha", label: "Cozinha (KDS)", icon: ChefHat, C: Cozinha },
+  { k: "pedidos", label: "Pedidos ao vivo", icon: BellIcon, C: PedidosVivo },
+  { k: "entregador", label: "Entregador", icon: Bike, C: Entregador },
   { k: "cardapio", label: "Produtos & cardápio", icon: Utensils, C: Cardapio },
   { k: "estoque", label: "Estoque & fichas técnicas", icon: Boxes, C: Estoque },
   { k: "compras", label: "Compras & NF-e (XML)", icon: ClipboardList, C: Compras },
