@@ -610,19 +610,45 @@ function Tour({ step, setStep, onModule, onClose }) {
 }
 
 /* ============================ Módulos ============================ */
-function Dashboard() {
+function Dashboard({ toast }) {
+  const [low, setLow] = useState([]);
+  const [stats, setStats] = useState({ vendas: 0, pedidos: 0, ticket: 0 });
+  const load = async () => {
+    const ri = await supabase.from("ingredients").select("*").eq("storeId", STORE_ID);
+    if (ri.data) setLow(ri.data.filter((i) => Number(i.stockQty) <= Number(i.minStock)));
+    const rp = await supabase.from("pedidos").select("total, createdAt").eq("storeId", STORE_ID);
+    if (rp.data) {
+      const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+      const doDia = rp.data.filter((p) => new Date(p.createdAt) >= hoje);
+      const soma = doDia.reduce((s, p) => s + Number(p.total || 0), 0);
+      setStats({ vendas: soma, pedidos: doDia.length, ticket: doDia.length ? soma / doDia.length : 0 });
+    }
+  };
+  useEffect(() => { load(); }, []);
+  const gerarPedido = async () => {
+    if (low.length === 0) return toast("Nenhum item em falta no momento.");
+    const pid = crypto.randomUUID();
+    const { error: e1 } = await supabase.from("purchases").insert({ id: pid, storeId: STORE_ID, supplier: "Pedido automático", status: "pedido", total: 0 });
+    if (e1) return toast("Erro: " + e1.message);
+    const items = low.map((i) => { const qtd = Math.max((Number(i.minStock) || 0) * 2 - Number(i.stockQty), Number(i.minStock) || 1); const uc = Number(i.avgPrice) || 0; return { purchaseId: pid, ingredientId: i.id, description: i.name, quantity: qtd, unit: i.unit, unitCost: uc, total: qtd * uc }; });
+    const { error: e2 } = await supabase.from("purchase_items").insert(items);
+    if (e2) return toast("Erro: " + e2.message);
+    const tot = items.reduce((s, x) => s + x.total, 0);
+    await supabase.from("purchases").update({ total: tot }).eq("id", pid);
+    toast("Pedido de compra gerado com " + items.length + " item(ns). Veja na aba Compras.");
+  };
   return (
-    <Section title="Visão geral" desc="Domingo, 14 de junho · tudo o que está acontecendo na sua loja agora.">
+    <Section title="Visão geral" desc="Tudo o que está acontecendo na sua loja agora.">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Stat icon={TrendingUp} label="Vendas hoje" value={money(8420)} delta="+12%" />
-        <Stat icon={Receipt} label="Pedidos hoje" value="183" delta="+8%" />
-        <Stat icon={Wallet} label="Ticket médio" value={money(46.0)} delta="+3%" />
-        <Stat icon={Gift} label="Zips distribuídos" value="1.240" delta="+19%" />
+        <Stat icon={TrendingUp} label="Vendas hoje" value={money(stats.vendas)} delta="" />
+        <Stat icon={Receipt} label="Pedidos hoje" value={String(stats.pedidos)} delta="" />
+        <Stat icon={Wallet} label="Ticket médio" value={money(stats.ticket)} delta="" />
+        <Stat icon={Gift} label="Itens em falta" value={String(low.length)} delta="" />
       </div>
       <div className="grid lg:grid-cols-3 gap-4 mt-4">
         <Card className="p-5 lg:col-span-2">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-bold" style={{ color: NAVY }}>Vendas na semana</h3><Pill tone="green">+14% vs. semana anterior</Pill>
+            <h3 className="font-bold" style={{ color: NAVY }}>Vendas na semana</h3><Pill tone="navy">Resumo</Pill>
           </div>
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={vendasSemana}>
@@ -638,13 +664,14 @@ function Dashboard() {
         <Card className="p-5">
           <h3 className="font-bold mb-3" style={{ color: NAVY }}>Estoque baixo</h3>
           <div className="space-y-3">
-            {INSUMOS.filter((i) => i.estoque <= i.min).map((i) => (
-              <div key={i.n} className="flex items-center justify-between">
-                <div className="flex items-center gap-2"><AlertTriangle size={16} color={ORANGE} /><span className="text-sm" style={{ color: NAVY }}>{i.n}</span></div>
-                <span className="text-sm font-semibold" style={{ color: ORANGE }}>{i.estoque} {i.un}</span>
+            {low.length === 0 && <p className="text-sm" style={{ color: "#9AA0A6" }}>Tudo abastecido.</p>}
+            {low.map((i) => (
+              <div key={i.id} className="flex items-center justify-between">
+                <div className="flex items-center gap-2"><AlertTriangle size={16} color={ORANGE} /><span className="text-sm" style={{ color: NAVY }}>{i.name}</span></div>
+                <span className="text-sm font-semibold" style={{ color: ORANGE }}>{Number(i.stockQty)} {i.unit}</span>
               </div>
             ))}
-            <Btn variant="ghost" size="sm" className="w-full mt-1" icon={ClipboardList}>Gerar pedido de compra</Btn>
+            <Btn variant="ghost" size="sm" className="w-full mt-1" icon={ClipboardList} onClick={gerarPedido}>Gerar pedido de compra</Btn>
           </div>
         </Card>
       </div>
@@ -1048,34 +1075,114 @@ function Estoque({ toast }) {
 }
 
 function Compras({ toast }) {
-  const [imported, setImported] = useState(false);
-  const itens = [
-    { n: "Farinha de trigo", q: "50 kg", v: 205.0 }, { n: "Queijo mussarela", q: "20 kg", v: 798.0 },
-    { n: "Caixa de pizza", q: "200 un", v: 442.0 }, { n: "Molho de tomate", q: "30 L", v: 279.0 },
-  ];
+  const [insumos, setInsumos] = useState([]);
+  const [pos, setPos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState(null);
+  const nomeIns = (id) => (insumos.find((i) => i.id === id) || {});
+
+  const load = async () => {
+    setLoading(true);
+    const ri = await supabase.from("ingredients").select("id,name,unit,avgPrice,stockQty").eq("storeId", STORE_ID).order("name");
+    setInsumos(ri.data || []);
+    const rp = await supabase.from("purchases").select("*").eq("storeId", STORE_ID).order("createdAt", { ascending: false });
+    const purchases = rp.data || [];
+    const ids = purchases.map((p) => p.id);
+    const itemsByP = {};
+    if (ids.length) { const rit = await supabase.from("purchase_items").select("*").in("purchaseId", ids); (rit.data || []).forEach((it) => { (itemsByP[it.purchaseId] = itemsByP[it.purchaseId] || []).push(it); }); }
+    setPos(purchases.map((p) => ({ ...p, items: itemsByP[p.id] || [] })));
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const aplicarEstoque = async (items) => {
+    for (const it of items) {
+      if (!it.ingredientId) continue;
+      const { data: ing } = await supabase.from("ingredients").select("stockQty, avgPrice").eq("id", it.ingredientId).single();
+      if (!ing) continue;
+      const oldQty = Number(ing.stockQty) || 0, oldAvg = Number(ing.avgPrice) || 0;
+      const q = Number(it.quantity) || 0, uc = Number(it.unitCost) || 0;
+      const newQty = oldQty + q;
+      const newAvg = newQty > 0 ? (oldQty * oldAvg + q * uc) / newQty : oldAvg;
+      await supabase.from("ingredients").update({ stockQty: newQty, avgPrice: newAvg, updatedAt: new Date().toISOString() }).eq("id", it.ingredientId);
+      await supabase.from("stock_movements").insert({ ingredientId: it.ingredientId, type: "in", quantity: q, unitCost: uc, reason: "compra" });
+    }
+  };
+  const receber = async (po) => {
+    if (!po.items.length) return toast("Pedido sem itens");
+    await aplicarEstoque(po.items);
+    await supabase.from("purchases").update({ status: "received" }).eq("id", po.id);
+    toast("Estoque atualizado pela compra (preço médio recalculado)."); load();
+  };
+  const salvarCompra = async () => {
+    const rows = form.linhas.filter((l) => l.ingredientId && l.quantity);
+    if (!rows.length) return toast("Adicione ao menos um item");
+    const pid = crypto.randomUUID();
+    const tot = rows.reduce((s, l) => s + Number(l.quantity) * Number(l.unitCost || 0), 0);
+    const e1 = await supabase.from("purchases").insert({ id: pid, storeId: STORE_ID, supplier: form.supplier || "Compra manual", status: "received", total: tot });
+    if (e1.error) return toast("Erro: " + e1.error.message);
+    await supabase.from("purchase_items").insert(rows.map((l) => ({ purchaseId: pid, ingredientId: l.ingredientId, description: nomeIns(l.ingredientId).name, quantity: Number(l.quantity), unit: nomeIns(l.ingredientId).unit, unitCost: Number(l.unitCost || 0), total: Number(l.quantity) * Number(l.unitCost || 0) })));
+    await aplicarEstoque(rows);
+    toast("Compra lançada e estoque atualizado."); setForm(null); load();
+  };
+
+  const pendentes = pos.filter((p) => p.status === "pedido");
+  const recebidas = pos.filter((p) => p.status !== "pedido");
+
   return (
-    <Section title="Compras & entrada de nota (NF-e)" desc="Importe o XML do fornecedor: leitura automática dos itens e atualização do preço médio." right={<Btn icon={Upload} onClick={() => { setImported(true); toast("XML lido · 4 itens reconhecidos"); }}>Importar XML da NF-e</Btn>}>
-      {!imported ? (
-        <Card className="p-10 text-center border-dashed" style={{ borderWidth: 2, borderColor: "#E2E2E2" }}>
-          <Upload size={32} color="#9AA0A6" className="mx-auto mb-3" />
-          <p className="font-medium" style={{ color: NAVY }}>Arraste o XML da nota fiscal aqui</p>
-          <p className="text-sm mt-1" style={{ color: "#9AA0A6" }}>O sistema reconhece itens, quantidades, valores e CNPJ do fornecedor.</p>
-        </Card>
-      ) : (
-        <Card className="p-5">
-          <div className="flex items-center gap-2 mb-4"><CheckCircle2 size={18} color="#1B7F4B" /><span className="font-semibold text-sm" style={{ color: NAVY }}>NF-e 000.142.889 · Distribuidora Pão & Cia</span></div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm"><thead><tr style={{ background: CREAM }}>{["Item", "Qtd", "Valor", "Ação"].map((h) => <th key={h} className="text-left px-4 py-2 font-semibold" style={{ color: NAVY }}>{h}</th>)}</tr></thead>
-              <tbody>{itens.map((i) => (
-                <tr key={i.n} className="border-t" style={{ borderColor: "#F0F0F0" }}>
-                  <td className="px-4 py-2" style={{ color: NAVY }}>{i.n}</td><td className="px-4 py-2" style={{ color: "#4B5563" }}>{i.q}</td>
-                  <td className="px-4 py-2" style={{ color: "#4B5563" }}>{money(i.v)}</td><td className="px-4 py-2"><Pill tone="green">Conferido</Pill></td>
+    <Section title="Compras & entrada de estoque" desc="Lance compras e receba os pedidos: o estoque e o preço médio são atualizados na hora." right={<Btn icon={Plus} onClick={() => setForm({ supplier: "", linhas: [{ ingredientId: insumos[0]?.id || "", quantity: "", unitCost: "" }] })}>Nova compra</Btn>}>
+      {loading ? <p className="text-sm" style={{ color: "#9AA0A6" }}>Carregando...</p> : (<>
+        <h3 className="font-bold mb-2" style={{ color: NAVY }}>Pedidos de compra pendentes</h3>
+        {pendentes.length === 0 ? <p className="text-sm mb-5" style={{ color: "#9AA0A6" }}>Nenhum pedido pendente. Você pode gerar um na Visão geral (estoque baixo) ou lançar uma compra manual.</p> : (
+          <div className="space-y-3 mb-6">
+            {pendentes.map((po) => (
+              <Card key={po.id} className="p-4">
+                <div className="flex items-center justify-between mb-2"><div className="font-semibold text-sm" style={{ color: NAVY }}>{po.supplier} · {money(Number(po.total))}</div><Pill tone="orange">Pendente</Pill></div>
+                <ul className="text-sm space-y-1 mb-3" style={{ color: "#4B5563" }}>{po.items.map((it) => <li key={it.id}>{Number(it.quantity)} {it.unit || ""} {it.description || nomeIns(it.ingredientId).name} · {money(Number(it.unitCost))}/un</li>)}</ul>
+                <Btn size="sm" icon={Boxes} onClick={() => receber(po)}>Receber no estoque</Btn>
+              </Card>
+            ))}
+          </div>
+        )}
+        <h3 className="font-bold mb-2" style={{ color: NAVY }}>Compras recebidas</h3>
+        {recebidas.length === 0 ? <p className="text-sm" style={{ color: "#9AA0A6" }}>Nenhuma compra lançada ainda.</p> : (
+          <Card className="p-0 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead><tr style={{ background: CREAM }}>{["Fornecedor", "Itens", "Total", "Quando"].map((h) => <th key={h} className="text-left px-4 py-3 font-semibold" style={{ color: NAVY }}>{h}</th>)}</tr></thead>
+              <tbody>{recebidas.map((po) => (
+                <tr key={po.id} className="border-t" style={{ borderColor: "#F0F0F0" }}>
+                  <td className="px-4 py-3 font-medium" style={{ color: NAVY }}>{po.supplier}</td>
+                  <td className="px-4 py-3" style={{ color: "#4B5563" }}>{po.items.length}</td>
+                  <td className="px-4 py-3" style={{ color: "#4B5563" }}>{money(Number(po.total))}</td>
+                  <td className="px-4 py-3" style={{ color: "#9AA0A6" }}>{new Date(po.createdAt).toLocaleDateString("pt-BR")}</td>
                 </tr>
               ))}</tbody>
             </table>
-          </div>
-          <Btn className="mt-4" icon={Boxes} onClick={() => toast("Itens lançados no estoque · preço médio recalculado")}>Lançar tudo no estoque</Btn>
-        </Card>
+          </Card>
+        )}
+      </>)}
+
+      {form && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(26,33,54,.55)" }}>
+          <Card className="w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>Nova compra</h3><button onClick={() => setForm(null)}><X size={20} color="#9AA0A6" /></button></div>
+            <label className="text-sm font-medium" style={{ color: NAVY }}>Fornecedor</label>
+            <input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} placeholder="Nome do fornecedor" className="w-full mt-1 mb-4 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            <label className="text-sm font-medium" style={{ color: NAVY }}>Itens comprados</label>
+            <div className="space-y-2 mt-1 mb-3">
+              {form.linhas.map((l, idx) => (
+                <div key={idx} className="flex gap-2">
+                  <select value={l.ingredientId} onChange={(e) => { const ls = [...form.linhas]; ls[idx] = { ...ls[idx], ingredientId: e.target.value }; setForm({ ...form, linhas: ls }); }} className="flex-1 px-2 py-2 rounded-lg border text-sm bg-white outline-none" style={{ borderColor: "#E2E2E2" }}>{insumos.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</select>
+                  <input value={l.quantity} onChange={(e) => { const ls = [...form.linhas]; ls[idx] = { ...ls[idx], quantity: e.target.value }; setForm({ ...form, linhas: ls }); }} type="number" step="0.001" placeholder="Qtd" className="w-16 px-2 py-2 rounded-lg border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+                  <input value={l.unitCost} onChange={(e) => { const ls = [...form.linhas]; ls[idx] = { ...ls[idx], unitCost: e.target.value }; setForm({ ...form, linhas: ls }); }} type="number" step="0.01" placeholder="R$/un" className="w-20 px-2 py-2 rounded-lg border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+                  <button onClick={() => setForm({ ...form, linhas: form.linhas.filter((_, i) => i !== idx) })} className="px-1" style={{ color: "#C0392B" }}><X size={16} /></button>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setForm({ ...form, linhas: [...form.linhas, { ingredientId: insumos[0]?.id || "", quantity: "", unitCost: "" }] })} className="text-sm font-semibold mb-4 inline-flex items-center gap-1" style={{ color: ORANGE }}><Plus size={14} />Adicionar item</button>
+            <Btn className="w-full" icon={Boxes} onClick={salvarCompra}>Lançar no estoque</Btn>
+          </Card>
+        </div>
       )}
     </Section>
   );
@@ -1090,7 +1197,7 @@ function Fiscal({ toast }) {
         <Card className="p-5"><div className="flex items-center gap-2 mb-2"><Zap size={18} color={ORANGE} /><span className="font-semibold text-sm" style={{ color: NAVY }}>SEFAZ</span></div><Pill tone="green">Online · autorizando</Pill></Card>
       </div>
       <Card className="p-5">
-        <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>Últimas notas emitidas</h3><Btn size="sm" variant="ghost" icon={Receipt} onClick={() => toast("NFC-e de teste emitida")}>Emitir NFC-e de teste</Btn></div>
+        <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>Últimas notas emitidas</h3><Btn size="sm" variant="ghost" icon={Receipt} onClick={() => toast("A emissão real de NFC-e precisa do certificado A1 e do servidor fiscal.")}>Sobre a emissão</Btn></div>
         <div className="space-y-2">
           {[["NFC-e 4421", "Balcão 1", "R$ 46,90", "Autorizada"], ["NFC-e 4420", "Restaurante", "R$ 128,00", "Autorizada"], ["NF-e 889", "Festa Corp X", "R$ 920,00", "Autorizada"]].map((r) => (
             <div key={r[0]} className="flex items-center justify-between p-3 rounded-xl" style={{ background: "#FAFAFA" }}>
@@ -1376,34 +1483,51 @@ function Clube({ toast }) {
 }
 
 function Pagamentos({ toast }) {
-  const [mp, setMp] = useState(true);
+  const [registers, setRegisters] = useState([]);
+  const [form, setForm] = useState(null);
+  const load = async () => { const { data } = await supabase.from("registers").select("*").eq("storeId", STORE_ID).order("createdAt"); setRegisters(data || []); };
+  useEffect(() => { load(); }, []);
+  const salvarPdv = async () => { if (!form.name) return toast("Informe o nome do PDV"); const { error } = await supabase.from("registers").insert({ id: crypto.randomUUID(), storeId: STORE_ID, name: form.name, location: form.location || null, status: "offline" }); if (error) return toast("Erro: " + error.message); toast("PDV cadastrado"); setForm(null); load(); };
+  const toggleStatus = async (r) => { const ns = r.status === "online" ? "offline" : "online"; setRegisters((l) => l.map((x) => x.id === r.id ? { ...x, status: ns } : x)); await supabase.from("registers").update({ status: ns }).eq("id", r.id); };
+  const excluir = async (r) => { if (!window.confirm("Excluir " + r.name + "?")) return; await supabase.from("registers").delete().eq("id", r.id); toast("PDV removido"); load(); };
   return (
-    <Section title="Pagamentos & PDVs" desc="Mercado Pago (Pix + cartão online), maquineta local e cadastro de cada caixa.">
+    <Section title="Pagamentos & PDVs" desc="Caixas (PDVs) da loja e meios de pagamento.">
       <div className="grid md:grid-cols-2 gap-4 mb-4">
         <Card className="p-6">
-          <div className="flex items-center justify-between mb-3"><div className="flex items-center gap-2"><Wallet size={18} color={ORANGE} /><span className="font-bold" style={{ color: NAVY }}>Mercado Pago</span></div><Pill tone={mp ? "green" : "gray"}>{mp ? "Conectado" : "Desconectado"}</Pill></div>
-          <label className="text-sm font-medium" style={{ color: NAVY }}>Access Token</label>
-          <input defaultValue="APP_USR-••••••••••••-prod" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm" style={{ borderColor: "#E2E2E2" }} />
-          <Btn size="sm" onClick={() => { setMp(true); toast("Mercado Pago conectado"); }}>Salvar e conectar</Btn>
+          <div className="flex items-center justify-between mb-3"><div className="flex items-center gap-2"><Wallet size={18} color={ORANGE} /><span className="font-bold" style={{ color: NAVY }}>Mercado Pago (Pix + cartão)</span></div><Pill tone="gray">Configurar no servidor</Pill></div>
+          <p className="text-sm" style={{ color: "#6B7280" }}>Por segurança, a chave secreta do Mercado Pago fica no servidor de pagamento — não no navegador. Com o servidor no ar, o Pix e o cartão online ficam ativos no checkout do cliente.</p>
         </Card>
         <Card className="p-6">
           <div className="flex items-center gap-2 mb-3"><CreditCard size={18} color={ORANGE} /><span className="font-bold" style={{ color: NAVY }}>Maquineta local</span></div>
-          <p className="text-sm mb-3" style={{ color: "#6B7280" }}>Integração com maquineta para cartão presencial (crédito, débito e Pix no balcão).</p>
-          <Pill tone="green">Point Pro pareada</Pill>
+          <p className="text-sm" style={{ color: "#6B7280" }}>Cartão presencial (crédito, débito e Pix no balcão) pela maquineta, integrada no app do caixa.</p>
         </Card>
       </div>
       <Card className="p-5">
-        <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>PDVs cadastrados</h3><Btn size="sm" variant="ghost" icon={Plus}>Cadastrar PDV</Btn></div>
-        <div className="grid md:grid-cols-3 gap-3">
-          {PDVS.map((p) => (
-            <div key={p.n} className="p-4 rounded-xl border" style={{ borderColor: "#ECECEC" }}>
-              <div className="flex items-center gap-2 mb-2"><Store size={16} color={NAVY} /><span className="font-semibold text-sm" style={{ color: NAVY }}>{p.n}</span></div>
-              <div className="text-sm" style={{ color: "#9AA0A6" }}>{p.local}</div>
-              <div className="mt-2"><Pill tone={p.status === "Online" ? "green" : "gray"}>{p.status}</Pill></div>
-            </div>
-          ))}
-        </div>
+        <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>PDVs (caixas) cadastrados</h3><Btn size="sm" variant="ghost" icon={Plus} onClick={() => setForm({ name: "", location: "" })}>Cadastrar PDV</Btn></div>
+        {registers.length === 0 ? <p className="text-sm" style={{ color: "#9AA0A6" }}>Nenhum PDV. Clique em "Cadastrar PDV".</p> : (
+          <div className="grid md:grid-cols-3 gap-3">
+            {registers.map((p) => (
+              <div key={p.id} className="p-4 rounded-xl border" style={{ borderColor: "#ECECEC" }}>
+                <div className="flex items-center gap-2 mb-2"><Store size={16} color={NAVY} /><span className="font-semibold text-sm" style={{ color: NAVY }}>{p.name}</span></div>
+                <div className="text-sm" style={{ color: "#9AA0A6" }}>{p.location || "—"}</div>
+                <div className="mt-2 flex items-center justify-between"><button onClick={() => toggleStatus(p)}><Pill tone={p.status === "online" ? "green" : "gray"}>{p.status === "online" ? "Online" : "Offline"}</Pill></button><button onClick={() => excluir(p)} style={{ color: "#C0392B" }}><X size={14} /></button></div>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
+      {form && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(26,33,54,.55)" }}>
+          <Card className="w-full max-w-sm p-6">
+            <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>Cadastrar PDV</h3><button onClick={() => setForm(null)}><X size={20} color="#9AA0A6" /></button></div>
+            <label className="text-sm font-medium" style={{ color: NAVY }}>Nome do caixa</label>
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ex.: Caixa 1" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            <label className="text-sm font-medium" style={{ color: NAVY }}>Local</label>
+            <input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="Ex.: Balcão da frente" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            <Btn className="w-full mt-1" icon={Check} onClick={salvarPdv}>Cadastrar</Btn>
+          </Card>
+        </div>
+      )}
     </Section>
   );
 }
@@ -1440,24 +1564,58 @@ function Whats({ toast }) {
   );
 }
 
-function Usuarios() {
+const TENANT_ID = "cmq05qwp40000j5kvyxvr9ldv";
+const ROLE_OPTS = [["MANAGER", "Gerente"], ["OPERATOR", "Operador de caixa"], ["BAKER", "Cozinha / Padeiro"], ["COURIER", "Entregador"], ["TENANT_ADMIN", "Administrador"]];
+const roleLabel = (r) => (ROLE_OPTS.find((x) => x[0] === r) || [r, r])[1];
+function Usuarios({ toast }) {
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState(null);
+  const load = async () => { setLoading(true); const { data, error } = await supabase.from("users").select("*").eq("tenantId", TENANT_ID).neq("role", "CUSTOMER").order("createdAt", { ascending: false }); if (error) toast("Erro: " + error.message); else setList(data || []); setLoading(false); };
+  useEffect(() => { load(); }, []);
+  const salvar = async () => {
+    if (!form.name) return toast("Informe o nome");
+    if (form.id) { const { error } = await supabase.from("users").update({ name: form.name, email: form.email || null, phone: form.phone || null, role: form.role, updatedAt: new Date().toISOString() }).eq("id", form.id); if (error) return toast("Erro: " + error.message); toast("Usuário atualizado"); }
+    else { const { error } = await supabase.from("users").insert({ id: crypto.randomUUID(), tenantId: TENANT_ID, name: form.name, email: form.email || null, phone: form.phone || null, role: form.role, updatedAt: new Date().toISOString() }); if (error) return toast("Erro: " + error.message); toast("Usuário cadastrado"); }
+    setForm(null); load();
+  };
+  const excluir = async (u) => { if (!window.confirm("Excluir " + u.name + "?")) return; const { error } = await supabase.from("users").delete().eq("id", u.id); if (error) return toast("Erro: " + error.message); toast("Usuário removido"); load(); };
   return (
-    <Section title="Usuários & permissões" desc="Equipe com papéis e níveis de acesso." right={<Btn icon={Plus}>Novo usuário</Btn>}>
-      <Card className="p-0 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead><tr style={{ background: CREAM }}>{["Usuário", "Papel", "Acesso", ""].map((h) => <th key={h} className="text-left px-4 py-3 font-semibold" style={{ color: NAVY }}>{h}</th>)}</tr></thead>
-          <tbody>
-            {USUARIOS.map((u) => (
-              <tr key={u.n} className="border-t" style={{ borderColor: "#F0F0F0" }}>
-                <td className="px-4 py-3 font-medium" style={{ color: NAVY }}>{u.n}</td>
-                <td className="px-4 py-3"><Pill tone="navy">{u.papel}</Pill></td>
-                <td className="px-4 py-3" style={{ color: "#4B5563" }}>{u.acesso}</td>
-                <td className="px-4 py-3 text-right"><button className="text-sm font-semibold" style={{ color: ORANGE }}>Editar</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+    <Section title="Usuários & permissões" desc="Equipe com papéis e níveis de acesso — gravado no banco." right={<Btn icon={Plus} onClick={() => setForm({ name: "", email: "", phone: "", role: "OPERATOR" })}>Novo usuário</Btn>}>
+      {loading ? <p className="text-sm" style={{ color: "#9AA0A6" }}>Carregando...</p> : (
+        <Card className="p-0 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead><tr style={{ background: CREAM }}>{["Usuário", "Papel", "Contato", ""].map((h) => <th key={h} className="text-left px-4 py-3 font-semibold" style={{ color: NAVY }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {list.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center" style={{ color: "#9AA0A6" }}>Nenhum usuário da equipe ainda.</td></tr>}
+              {list.map((u) => (
+                <tr key={u.id} className="border-t" style={{ borderColor: "#F0F0F0" }}>
+                  <td className="px-4 py-3 font-medium" style={{ color: NAVY }}>{u.name}</td>
+                  <td className="px-4 py-3"><Pill tone="navy">{roleLabel(u.role)}</Pill></td>
+                  <td className="px-4 py-3" style={{ color: "#4B5563" }}>{u.email || u.phone || "—"}</td>
+                  <td className="px-4 py-3 text-right whitespace-nowrap"><button onClick={() => setForm({ id: u.id, name: u.name, email: u.email || "", phone: u.phone || "", role: u.role })} className="text-sm font-semibold mr-3" style={{ color: NAVY }}>Editar</button><button onClick={() => excluir(u)} className="text-sm font-semibold" style={{ color: "#C0392B" }}>Excluir</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+      {form && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(26,33,54,.55)" }}>
+          <Card className="w-full max-w-sm p-6">
+            <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>{form.id ? "Editar usuário" : "Novo usuário"}</h3><button onClick={() => setForm(null)}><X size={20} color="#9AA0A6" /></button></div>
+            <label className="text-sm font-medium" style={{ color: NAVY }}>Nome</label>
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            <label className="text-sm font-medium" style={{ color: NAVY }}>Papel</label>
+            <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm bg-white outline-none" style={{ borderColor: "#E2E2E2" }}>{ROLE_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+            <div className="grid grid-cols-2 gap-2">
+              <div><label className="text-sm font-medium" style={{ color: NAVY }}>E-mail</label><input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /></div>
+              <div><label className="text-sm font-medium" style={{ color: NAVY }}>Telefone</label><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /></div>
+            </div>
+            <Btn className="w-full mt-1" icon={Check} onClick={salvar}>{form.id ? "Salvar" : "Cadastrar"}</Btn>
+          </Card>
+        </div>
+      )}
     </Section>
   );
 }
@@ -1661,14 +1819,30 @@ function ClienteApp({ onExit, toast }) {
   const [enc, setEnc] = useState({ item: "", quando: "", obs: "", nome: "", tel: "" });
   const [encDone, setEncDone] = useState(false);
 
-  const cats = UNITS.filter((u) => PRODUTOS[u.k] && u.k !== "pesagem");
+  const [cats, setCats] = useState([]);
+  const [loadingMenu, setLoadingMenu] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const rc = await supabase.from("product_categories").select("*").eq("storeId", STORE_ID).order("order");
+      const rp = await supabase.from("products").select("id,name,price,categoryId,imageUrl,description,available").eq("storeId", STORE_ID).order("order");
+      const prods = (rp.data || []).filter((p) => p.available !== false);
+      const categs = rc.data || [];
+      let grouped = categs.map((c) => ({ id: c.id, name: c.name, produtos: prods.filter((p) => p.categoryId === c.id) })).filter((g) => g.produtos.length);
+      const semCat = prods.filter((p) => !categs.find((c) => c.id === p.categoryId));
+      if (semCat.length) grouped.push({ id: "_outros", name: "Outros", produtos: semCat });
+      if (grouped.length === 0 && prods.length) grouped = [{ id: "_all", name: "Cardápio", produtos: prods }];
+      setCats(grouped);
+      setLoadingMenu(false);
+    })();
+  }, []);
+  const PALETA = ["#E8590C", "#C0392B", "#8B5E34", "#D35400", "#2E7D32", "#1565C0", "#C2185B", "#B8860B"];
+  const catCor = (id) => PALETA[Math.abs(String(id).split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % PALETA.length];
   const itemTotal = (x) => (x.p + x.extras.reduce((s, e) => s + e.p, 0)) * x.q;
   const total = cart.reduce((s, x) => s + itemTotal(x), 0);
   const count = cart.reduce((s, x) => s + x.q, 0);
-  const iconOf = (k) => (UNITS.find((u) => u.k === k) || {}).icon || Utensils;
 
-  const abrir = (p, cat) => { setSel({ p, cat }); setQty(1); setObs(""); setExtras([]); };
-  const addCart = () => { setCart((c) => [...c, { key: Date.now(), n: sel.p.n, p: sel.p.p, cat: sel.cat, q: qty, obs, extras }]); toast(qty + "× " + sel.p.n + " no carrinho"); setSel(null); };
+  const abrir = (p, catId) => { setSel({ p, catId }); setQty(1); setObs(""); setExtras([]); };
+  const addCart = () => { setCart((c) => [...c, { key: Date.now(), productId: sel.p.id, n: sel.p.name, p: Number(sel.p.price), catId: sel.catId, q: qty, obs, extras }]); toast(qty + "× " + sel.p.name + " no carrinho"); setSel(null); };
   const toggleExtra = (e) => setExtras((arr) => arr.find((x) => x.n === e.n) ? arr.filter((x) => x.n !== e.n) : [...arr, e]);
   const removeItem = (key) => setCart((c) => c.filter((x) => x.key !== key));
   const buscarCep = async (cep) => { const c = (cep || "").replace(/\D/g, ""); if (c.length !== 8) return; try { const r = await fetch("https://viacep.com.br/ws/" + c + "/json/"); const d = await r.json(); if (!d.erro) setCo((s) => ({ ...s, rua: d.logradouro || "", bairro: d.bairro || "", cidade: d.localidade || "", uf: d.uf || "" })); } catch (e) {} };
@@ -1677,7 +1851,7 @@ function ClienteApp({ onExit, toast }) {
     if (!co.nome || !co.tel) return toast("Informe nome e telefone");
     if (co.tipo === "entrega" && !co.cep) return toast("Informe o endereço de entrega");
     const endereco = co.tipo === "entrega" ? (co.rua + ", " + co.num + (co.comp ? " - " + co.comp : "") + " - " + co.bairro + ", " + co.cidade + "/" + co.uf) : "Retirada na loja";
-    const itens = cart.map((x) => ({ nome: x.n, qtd: x.q, preco: x.p, extras: x.extras.map((e) => e.n), obs: x.obs }));
+    const itens = cart.map((x) => ({ productId: x.productId, nome: x.n, qtd: x.q, preco: x.p, extras: x.extras.map((e) => e.n), obs: x.obs }));
     const { data, error } = await supabase.from("pedidos").insert({ storeId: STORE_ID, tipo: co.tipo, cliente: co.nome, telefone: co.tel, endereco, itens, total, pagamento: co.pagamento, status: "novo" }).select("id").single();
     if (error) return toast("Erro: " + error.message);
     setDone({ id: data.id, num: String(data.id).replace(/-/g, "").slice(0, 4).toUpperCase(), total, tipo: co.tipo, endereco, pagamento: co.pagamento }); setCart([]);
@@ -1714,21 +1888,27 @@ function ClienteApp({ onExit, toast }) {
         </div>
 
         {tab === "cardapio" && (
+          loadingMenu ? <Card className="p-8 text-center"><span className="text-sm" style={{ color: "#9AA0A6" }}>Carregando cardápio...</span></Card>
+          : cats.length === 0 ? <Card className="p-8 text-center"><span className="text-sm" style={{ color: "#9AA0A6" }}>O cardápio ainda não tem produtos. O dono cadastra em "Cardápio" no painel.</span></Card>
+          : (
           <div className="space-y-6">
             {cats.map((u) => (
-              <div key={u.k}>
-                <div className="flex items-center gap-2 mb-2"><u.icon size={16} color={ORANGE} /><h3 className="font-bold" style={{ color: NAVY }}>{u.label}</h3></div>
+              <div key={u.id}>
+                <div className="flex items-center gap-2 mb-2"><Utensils size={16} color={ORANGE} /><h3 className="font-bold" style={{ color: NAVY }}>{u.name}</h3></div>
                 <div className="grid sm:grid-cols-2 gap-3">
-                  {PRODUTOS[u.k].map((p) => (
-                    <button key={p.n} onClick={() => abrir(p, u.k)} className="text-left bg-white rounded-2xl border overflow-hidden hover:shadow-md transition flex" style={{ borderColor: "#ECECEC" }}>
-                      <div className="w-24 shrink-0 flex items-center justify-center" style={{ background: "linear-gradient(135deg," + catColor(u.k) + "," + catColor(u.k) + "bb)" }}>{(() => { const I = u.icon; return <I size={30} color="rgba(255,255,255,.92)" />; })()}</div>
-                      <div className="p-3 flex-1"><div className="font-semibold text-sm" style={{ color: NAVY }}>{p.n}</div><div className="text-xs mt-0.5" style={{ color: "#9AA0A6" }}>Toque para escolher</div><div className="text-sm mt-1 font-bold" style={{ color: ORANGE }}>{money(p.p)}</div></div>
+                  {u.produtos.map((p) => (
+                    <button key={p.id} onClick={() => abrir(p, u.id)} className="text-left bg-white rounded-2xl border overflow-hidden hover:shadow-md transition flex" style={{ borderColor: "#ECECEC" }}>
+                      {p.imageUrl
+                        ? <img src={p.imageUrl} alt={p.name} className="w-24 h-24 shrink-0 object-cover" />
+                        : <div className="w-24 shrink-0 flex items-center justify-center" style={{ background: "linear-gradient(135deg," + catCor(u.id) + "," + catCor(u.id) + "bb)" }}><Utensils size={30} color="rgba(255,255,255,.92)" /></div>}
+                      <div className="p-3 flex-1"><div className="font-semibold text-sm" style={{ color: NAVY }}>{p.name}</div><div className="text-xs mt-0.5" style={{ color: "#9AA0A6" }}>{p.description || "Toque para escolher"}</div><div className="text-sm mt-1 font-bold" style={{ color: ORANGE }}>{money(Number(p.price))}</div></div>
                     </button>
                   ))}
                 </div>
               </div>
             ))}
           </div>
+          )
         )}
 
         {tab === "pedido" && (
@@ -1813,13 +1993,13 @@ function ClienteApp({ onExit, toast }) {
       {sel && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4" style={{ background: "rgba(26,33,54,.55)" }}>
           <Card className="w-full sm:max-w-md p-0 overflow-hidden rounded-t-2xl sm:rounded-2xl">
-            <div className="h-40 flex items-center justify-center relative" style={{ background: "linear-gradient(135deg," + catColor(sel.cat) + "," + catColor(sel.cat) + "bb)" }}>
-              {(() => { const I = iconOf(sel.cat); return <I size={56} color="rgba(255,255,255,.92)" />; })()}
+            <div className="h-40 flex items-center justify-center relative" style={{ background: "linear-gradient(135deg," + catCor(sel.catId) + "," + catCor(sel.catId) + "bb)" }}>
+              {sel.p.imageUrl ? <img src={sel.p.imageUrl} alt={sel.p.name} className="w-full h-full object-cover" /> : <Utensils size={56} color="rgba(255,255,255,.92)" />}
               <button onClick={() => setSel(null)} className="absolute top-3 right-3 h-8 w-8 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,.3)" }}><X size={18} color="#fff" /></button>
             </div>
             <div className="p-5">
-              <div className="flex items-center justify-between"><h3 className="font-bold text-lg" style={{ color: NAVY }}>{sel.p.n}</h3><span className="font-bold" style={{ color: ORANGE }}>{money(sel.p.p)}</span></div>
-              <p className="text-sm mt-1" style={{ color: "#9AA0A6" }}>Feito na hora. Personalize do seu jeito.</p>
+              <div className="flex items-center justify-between"><h3 className="font-bold text-lg" style={{ color: NAVY }}>{sel.p.name}</h3><span className="font-bold" style={{ color: ORANGE }}>{money(Number(sel.p.price))}</span></div>
+              <p className="text-sm mt-1" style={{ color: "#9AA0A6" }}>{sel.p.description || "Feito na hora. Personalize do seu jeito."}</p>
               <div className="mt-4"><div className="text-sm font-semibold mb-2" style={{ color: NAVY }}>Quer adicionar algo?</div>
                 <div className="space-y-2">{EXTRAS_SUG.map((e) => { const on = extras.find((x) => x.n === e.n); return (
                   <button key={e.n} onClick={() => toggleExtra(e)} className="w-full flex items-center justify-between p-2.5 rounded-xl border text-sm" style={on ? { borderColor: ORANGE, background: SOFT } : { borderColor: "#E2E2E2" }}><span style={{ color: NAVY }}>{e.n}</span><span style={{ color: ORANGE }}>+{money(e.p)}</span></button>
@@ -1834,7 +2014,7 @@ function ClienteApp({ onExit, toast }) {
                   <span className="text-xl font-bold w-8 text-center" style={{ color: NAVY }}>{qty}</span>
                   <button onClick={() => setQty((q) => q + 1)} className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: SOFT }}><Plus size={18} color={ORANGE} /></button>
                 </div>
-                <Btn className="flex-1" icon={ShoppingCart} onClick={addCart}>Adicionar {money((sel.p.p + extras.reduce((s, e) => s + e.p, 0)) * qty)}</Btn>
+                <Btn className="flex-1" icon={ShoppingCart} onClick={addCart}>Adicionar {money((Number(sel.p.price) + extras.reduce((s, e) => s + e.p, 0)) * qty)}</Btn>
               </div>
             </div>
           </Card>
