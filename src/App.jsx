@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, ShoppingCart, Boxes, ClipboardList, Printer, Calendar, Truck,
-  Users, Gift, Wallet, MessageCircle, UserCog, Plug, BarChart3, Utensils, Coffee,
+  Users, Gift, Wallet, MessageCircle, UserCog, Plug, BarChart3, Utensils, Coffee, Mail,
   Beef, Pizza, Cake, Croissant, Scale, Search, Bell, X, Check, Plus, Minus,
   CreditCard, QrCode, Banknote, AlertTriangle, ArrowRight, Upload, CheckCircle2,
   Circle, Clock, MapPin, LogOut, ShieldCheck, TrendingUp, Power, Menu, Store,
@@ -284,15 +284,24 @@ function PlanCard({ p, onChoose }) {
 function Landing({ onLogin, onCliente, toast }) {
   const [video, setVideo] = useState(false);
   const [ag, setAg] = useState({ nome: "", neg: "", tel: "", dia: "" });
+  const [ct, setCt] = useState({ nome: "", email: "", msg: "" });
+  const WA = "https://wa.me/5581981968644?text=" + encodeURIComponent("Olá! Quero falar com um especialista do Zipão.");
+  const enviarContato = () => {
+    if (!ct.nome || !ct.msg) return toast("Preencha seu nome e a mensagem");
+    const assunto = encodeURIComponent("Contato Zipão — " + ct.nome);
+    const corpo = encodeURIComponent("Nome: " + ct.nome + "\nE-mail: " + ct.email + "\n\nMensagem:\n" + ct.msg);
+    window.location.href = "mailto:wilsonneri@hotmail.com?cc=moshe.caminha@gmail.com&subject=" + assunto + "&body=" + corpo;
+  };
   return (
     <div style={{ background: "#fff" }}>
       <header className="sticky top-0 z-40 border-b" style={{ background: "rgba(255,255,255,.92)", backdropFilter: "blur(8px)", borderColor: "#EEE" }}>
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4">
           <div className="flex items-center gap-2"><ZipIcon size={32} /><span className="font-bold text-lg" style={{ color: NAVY, fontFamily: "Fredoka, sans-serif" }}>Zipão</span></div>
           <nav className="hidden md:flex items-center gap-6 ml-6 text-sm font-medium" style={{ color: "#4B5563" }}>
-            <a href="#recursos">Recursos</a><a href="#planos">Planos</a><a href="#agendar">Agendar</a>
+            <a href="#recursos">Recursos</a><a href="#planos">Planos</a><a href="#agendar">Agendar</a><a href="#contato">Contato</a>
           </nav>
           <div className="ml-auto flex items-center gap-2">
+            <a href={WA} target="_blank" rel="noopener noreferrer" className="hidden sm:inline-flex text-sm font-semibold px-3 py-2 rounded-xl items-center gap-1.5" style={{ background: "#25D366", color: "#fff" }}><MessageCircle size={16} />Falar com especialista</a>
             <button onClick={onLogin} className="text-sm font-semibold px-3 py-2 rounded-xl" style={{ color: NAVY }}>Entrar</button>
             <a href="#planos" className="text-sm font-semibold px-4 py-2 rounded-xl" style={{ background: ORANGE, color: "#fff" }}>Começar agora</a>
           </div>
@@ -390,6 +399,25 @@ function Landing({ onLogin, onCliente, toast }) {
         </div>
       </section>
 
+      <section id="contato" className="max-w-6xl mx-auto px-4 py-14 grid md:grid-cols-2 gap-10 items-center">
+        <div>
+          <h2 className="text-3xl font-bold" style={{ color: NAVY }}>Fale com um especialista</h2>
+          <p className="mt-3" style={{ color: "#4B5563" }}>Tire suas dúvidas e veja como o Zipão se encaixa no seu negócio. Resposta rápida pelo WhatsApp.</p>
+          <a href={WA} target="_blank" rel="noopener noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-xl font-semibold px-5 py-3" style={{ background: "#25D366", color: "#fff" }}><MessageCircle size={18} />Falar no WhatsApp · (81) 98196-8644</a>
+          <p className="text-sm mt-3" style={{ color: "#9AA0A6" }}>Ou envie uma mensagem pelo formulário ao lado.</p>
+        </div>
+        <Card className="p-6">
+          <label className="text-sm font-medium" style={{ color: NAVY }}>Seu nome</label>
+          <input value={ct.nome} onChange={(e) => setCt({ ...ct, nome: e.target.value })} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+          <label className="text-sm font-medium" style={{ color: NAVY }}>Seu e-mail</label>
+          <input value={ct.email} onChange={(e) => setCt({ ...ct, email: e.target.value })} type="email" className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+          <label className="text-sm font-medium" style={{ color: NAVY }}>Mensagem</label>
+          <textarea value={ct.msg} onChange={(e) => setCt({ ...ct, msg: e.target.value })} rows={4} className="w-full mt-1 mb-3 px-3 py-2.5 rounded-xl border text-sm outline-none resize-none" style={{ borderColor: "#E2E2E2" }} />
+          <Btn className="w-full" icon={Mail} onClick={enviarContato}>Enviar mensagem</Btn>
+          <p className="text-xs mt-2 text-center" style={{ color: "#9AA0A6" }}>Abre seu e-mail para enviar a wilsonneri@hotmail.com</p>
+        </Card>
+      </section>
+
       <footer className="max-w-6xl mx-auto px-4 py-8 flex flex-col md:flex-row items-center justify-between gap-3">
         <div className="flex items-center gap-2"><ZipIcon size={26} /><span className="font-bold" style={{ color: NAVY, fontFamily: "Fredoka, sans-serif" }}>Zipão</span></div>
         <p className="text-sm" style={{ color: "#9AA0A6" }}>Pediu, zipou. · contato@zipao.com.br</p>
@@ -397,6 +425,7 @@ function Landing({ onLogin, onCliente, toast }) {
       </footer>
 
       {video && <VideoModal onClose={() => setVideo(false)} />}
+      <a href={WA} target="_blank" rel="noopener noreferrer" aria-label="Falar com especialista no WhatsApp" className="fixed bottom-5 right-5 z-50 rounded-full flex items-center gap-2 px-4 py-3 font-semibold shadow-lg" style={{ background: "#25D366", color: "#fff", boxShadow: "0 6px 20px rgba(0,0,0,.25)" }}><MessageCircle size={22} /><span className="hidden sm:inline">Especialista</span></a>
     </div>
   );
 }
