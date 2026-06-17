@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, ShoppingCart, Boxes, ClipboardList, Printer, Calendar, Truck,
-  Users, Gift, Wallet, MessageCircle, UserCog, Plug, BarChart3, Utensils, Coffee, Mail,
+  Users, Gift, Wallet, MessageCircle, UserCog, Plug, BarChart3, Utensils, Coffee, Mail, RotateCcw,
   Beef, Pizza, Cake, Croissant, Scale, Search, Bell, X, Check, Plus, Minus,
   CreditCard, QrCode, Banknote, AlertTriangle, ArrowRight, Upload, CheckCircle2,
   Circle, Clock, MapPin, LogOut, ShieldCheck, TrendingUp, Power, Menu, Store,
@@ -1309,11 +1309,32 @@ function Delivery({ toast }) {
   const tone = (s) => s.includes("caminho") ? "orange" : s.includes("Saiu") ? "blue" : "gray";
   const [couriers, setCouriers] = useState([]);
   const [form, setForm] = useState(null);
+  const [taxaCfg, setTaxaCfg] = useState({ deliveryFeeDefault: 0, freeAbove: 0 });
+  const [zones, setZones] = useState([]);
+  const [zForm, setZForm] = useState({ bairro: "", fee: "" });
+  const loadEntrega = async () => {
+    const rs = await supabase.from("store_settings").select("*").eq("storeId", STORE_ID).maybeSingle();
+    if (rs.data) setTaxaCfg({ deliveryFeeDefault: Number(rs.data.deliveryFeeDefault) || 0, freeAbove: Number(rs.data.freeAbove) || 0 });
+    const rz = await supabase.from("delivery_zones").select("*").eq("storeId", STORE_ID).order("bairro");
+    setZones(rz.data || []);
+  };
+  const salvarTaxa = async () => {
+    const { error } = await supabase.from("store_settings").upsert({ storeId: STORE_ID, deliveryFeeDefault: Number(taxaCfg.deliveryFeeDefault) || 0, freeAbove: Number(taxaCfg.freeAbove) || 0 }, { onConflict: "storeId" });
+    if (error) return toast("Erro: " + error.message);
+    toast("Taxas salvas");
+  };
+  const addZone = async () => {
+    if (!zForm.bairro) return toast("Informe o bairro");
+    const { error } = await supabase.from("delivery_zones").insert({ storeId: STORE_ID, bairro: zForm.bairro, fee: Number(zForm.fee) || 0 });
+    if (error) return toast("Erro: " + error.message);
+    setZForm({ bairro: "", fee: "" }); toast("Bairro adicionado"); loadEntrega();
+  };
+  const delZone = async (z) => { const { error } = await supabase.from("delivery_zones").delete().eq("id", z.id); if (error) return toast("Erro: " + error.message); toast("Removido"); loadEntrega(); };
   const load = async () => {
     const { data, error } = await supabase.from("couriers").select("*").eq("storeId", STORE_ID).order("createdAt", { ascending: false });
     if (error) toast("Erro: " + error.message); else setCouriers(data || []);
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); loadEntrega(); }, []);
   const aprovar = async (c, v) => { setCouriers((l) => l.map((x) => x.id === c.id ? { ...x, active: v } : x)); const { error } = await supabase.from("couriers").update({ active: v, updatedAt: new Date().toISOString() }).eq("id", c.id); if (error) { toast("Erro: " + error.message); load(); } else toast(v ? "Entregador autorizado" : "Acesso suspenso"); };
   const salvar = async () => {
     if (!form.name || !form.phone) return toast("Informe nome e telefone");
@@ -1351,7 +1372,30 @@ function Delivery({ toast }) {
           ))}
         </Card>
       </div>
-      {form && (
+      <Card className="p-5 mt-4">
+        <h3 className="font-bold mb-1" style={{ color: NAVY }}>Taxas de entrega</h3>
+        <p className="text-sm mb-4" style={{ color: "#9AA0A6" }}>Taxa padrão, frete grátis e valor por bairro. A loja do cliente usa isso no checkout automaticamente.</p>
+        <div className="grid sm:grid-cols-2 gap-3 mb-3">
+          <div><label className="text-sm font-medium" style={{ color: NAVY }}>Taxa padrão (R$)</label><input type="number" value={taxaCfg.deliveryFeeDefault} onChange={(e) => setTaxaCfg({ ...taxaCfg, deliveryFeeDefault: e.target.value })} className="w-full mt-1 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /></div>
+          <div><label className="text-sm font-medium" style={{ color: NAVY }}>Frete grátis acima de (R$)</label><input type="number" value={taxaCfg.freeAbove} onChange={(e) => setTaxaCfg({ ...taxaCfg, freeAbove: e.target.value })} className="w-full mt-1 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /></div>
+        </div>
+        <Btn size="sm" icon={Check} onClick={salvarTaxa}>Salvar taxas</Btn>
+        <div className="mt-5">
+          <div className="text-sm font-semibold mb-2" style={{ color: NAVY }}>Bairros atendidos</div>
+          {zones.length === 0 && <p className="text-sm mb-2" style={{ color: "#9AA0A6" }}>Sem bairros específicos — todos usam a taxa padrão.</p>}
+          {zones.map((z) => (
+            <div key={z.id} className="flex items-center justify-between py-2 border-b" style={{ borderColor: "#F2F2F2" }}>
+              <span className="text-sm" style={{ color: NAVY }}>{z.bairro}</span>
+              <div className="flex items-center gap-3"><span className="text-sm font-semibold" style={{ color: ORANGE }}>{money(Number(z.fee))}</span><button onClick={() => delZone(z)} style={{ color: "#C0392B" }}><X size={14} /></button></div>
+            </div>
+          ))}
+          <div className="flex gap-2 mt-3">
+            <input value={zForm.bairro} onChange={(e) => setZForm({ ...zForm, bairro: e.target.value })} placeholder="Bairro" className="flex-1 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            <input type="number" value={zForm.fee} onChange={(e) => setZForm({ ...zForm, fee: e.target.value })} placeholder="R$" className="w-24 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            <Btn size="sm" icon={Plus} onClick={addZone}>Add</Btn>
+          </div>
+        </div>
+      </Card>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(26,33,54,.55)" }}>
           <Card className="w-full max-w-sm p-6">
             <div className="flex items-center justify-between mb-3"><h3 className="font-bold" style={{ color: NAVY }}>Cadastrar entregador</h3><button onClick={() => setForm(null)}><X size={20} color="#9AA0A6" /></button></div>
@@ -1850,10 +1894,13 @@ function ClienteApp({ onExit, toast }) {
 
   const [cats, setCats] = useState([]);
   const [loadingMenu, setLoadingMenu] = useState(true);
+  const [cfg, setCfg] = useState({ deliveryFeeDefault: 0, freeAbove: 0 });
+  const [zones, setZones] = useState([]);
+  const [lastOrder, setLastOrder] = useState(null);
   useEffect(() => {
     (async () => {
       const rc = await supabase.from("product_categories").select("*").eq("storeId", STORE_ID).order("order");
-      const rp = await supabase.from("products").select("id,name,price,categoryId,imageUrl,description,available").eq("storeId", STORE_ID).order("order");
+      const rp = await supabase.from("products_public").select("*").eq("storeId", STORE_ID).order("order");
       const prods = (rp.data || []).filter((p) => p.available !== false);
       const categs = rc.data || [];
       let grouped = categs.map((c) => ({ id: c.id, name: c.name, produtos: prods.filter((p) => p.categoryId === c.id) })).filter((g) => g.produtos.length);
@@ -1862,6 +1909,11 @@ function ClienteApp({ onExit, toast }) {
       if (grouped.length === 0 && prods.length) grouped = [{ id: "_all", name: "Cardápio", produtos: prods }];
       setCats(grouped);
       setLoadingMenu(false);
+      const rs = await supabase.from("store_settings").select("*").eq("storeId", STORE_ID).maybeSingle();
+      if (rs.data) setCfg({ deliveryFeeDefault: Number(rs.data.deliveryFeeDefault) || 0, freeAbove: Number(rs.data.freeAbove) || 0 });
+      const rz = await supabase.from("delivery_zones").select("*").eq("storeId", STORE_ID);
+      setZones(rz.data || []);
+      try { const ls = localStorage.getItem("zipao_last_order"); if (ls) setLastOrder(JSON.parse(ls)); } catch (e) {}
     })();
   }, []);
   const PALETA = ["#E8590C", "#C0392B", "#8B5E34", "#D35400", "#2E7D32", "#1565C0", "#C2185B", "#B8860B"];
@@ -1869,11 +1921,21 @@ function ClienteApp({ onExit, toast }) {
   const itemTotal = (x) => (x.p + x.extras.reduce((s, e) => s + e.p, 0)) * x.q;
   const total = cart.reduce((s, x) => s + itemTotal(x), 0);
   const count = cart.reduce((s, x) => s + x.q, 0);
+  const norm = (s) => (s || "").trim().toLowerCase();
+  const zoneFee = () => { const z = zones.find((z) => norm(z.bairro) === norm(co.bairro)); return z ? Number(z.fee) : Number(cfg.deliveryFeeDefault) || 0; };
+  const taxa = co.tipo === "entrega" ? ((cfg.freeAbove > 0 && total >= cfg.freeAbove) ? 0 : zoneFee()) : 0;
+  const totalComTaxa = total + taxa;
 
-  const abrir = (p, catId) => { setSel({ p, catId }); setQty(1); setObs(""); setExtras([]); };
+  const abrir = (p, catId) => { if (p.esgotado) return toast("Produto esgotado no momento"); setSel({ p, catId }); setQty(1); setObs(""); setExtras([]); };
   const addCart = () => { setCart((c) => [...c, { key: Date.now(), productId: sel.p.id, n: sel.p.name, p: Number(sel.p.price), catId: sel.catId, q: qty, obs, extras }]); toast(qty + "× " + sel.p.name + " no carrinho"); setSel(null); };
   const toggleExtra = (e) => setExtras((arr) => arr.find((x) => x.n === e.n) ? arr.filter((x) => x.n !== e.n) : [...arr, e]);
   const removeItem = (key) => setCart((c) => c.filter((x) => x.key !== key));
+  const repedir = () => {
+    if (!lastOrder || !lastOrder.length) return;
+    const valid = lastOrder.filter((it) => cats.some((c) => c.produtos.some((p) => p.id === it.productId && !p.esgotado)));
+    if (!valid.length) return toast("Os itens do último pedido não estão disponíveis agora");
+    setCart(valid.map((it) => ({ ...it, key: Date.now() + Math.random() }))); setTab("pedido"); toast("Último pedido carregado no carrinho");
+  };
   const buscarCep = async (cep) => { const c = (cep || "").replace(/\D/g, ""); if (c.length !== 8) return; try { const r = await fetch("https://viacep.com.br/ws/" + c + "/json/"); const d = await r.json(); if (!d.erro) setCo((s) => ({ ...s, rua: d.logradouro || "", bairro: d.bairro || "", cidade: d.localidade || "", uf: d.uf || "" })); } catch (e) {} };
   const finalizar = async () => {
     if (cart.length === 0) return toast("Carrinho vazio");
@@ -1881,9 +1943,11 @@ function ClienteApp({ onExit, toast }) {
     if (co.tipo === "entrega" && !co.cep) return toast("Informe o endereço de entrega");
     const endereco = co.tipo === "entrega" ? (co.rua + ", " + co.num + (co.comp ? " - " + co.comp : "") + " - " + co.bairro + ", " + co.cidade + "/" + co.uf) : "Retirada na loja";
     const itens = cart.map((x) => ({ productId: x.productId, nome: x.n, qtd: x.q, preco: x.p, extras: x.extras.map((e) => e.n), obs: x.obs }));
-    const { data, error } = await supabase.from("pedidos").insert({ storeId: STORE_ID, tipo: co.tipo, cliente: co.nome, telefone: co.tel, endereco, itens, total, pagamento: co.pagamento, status: "novo" }).select("id").single();
+    if (taxa > 0) itens.push({ nome: "Taxa de entrega", qtd: 1, preco: taxa });
+    const { data, error } = await supabase.from("pedidos").insert({ storeId: STORE_ID, tipo: co.tipo, cliente: co.nome, telefone: co.tel, endereco, itens, total: totalComTaxa, pagamento: co.pagamento, status: "novo" }).select("id").single();
     if (error) return toast("Erro: " + error.message);
-    setDone({ id: data.id, num: String(data.id).replace(/-/g, "").slice(0, 4).toUpperCase(), total, tipo: co.tipo, endereco, pagamento: co.pagamento }); setCart([]);
+    try { localStorage.setItem("zipao_last_order", JSON.stringify(cart.map((x) => ({ productId: x.productId, n: x.n, p: x.p, catId: x.catId, q: x.q, obs: x.obs, extras: x.extras })))); } catch (e) {}
+    setDone({ id: data.id, num: String(data.id).replace(/-/g, "").slice(0, 4).toUpperCase(), total: totalComTaxa, tipo: co.tipo, endereco, pagamento: co.pagamento }); setCart([]);
   };
   const enviarEncomenda = async () => {
     if (!enc.item || !enc.nome) return toast("Informe o item e seu nome");
@@ -1921,16 +1985,22 @@ function ClienteApp({ onExit, toast }) {
           : cats.length === 0 ? <Card className="p-8 text-center"><span className="text-sm" style={{ color: "#9AA0A6" }}>O cardápio ainda não tem produtos. O dono cadastra em "Cardápio" no painel.</span></Card>
           : (
           <div className="space-y-6">
+            {lastOrder && lastOrder.length > 0 && (
+              <button onClick={repedir} className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm" style={{ background: SOFT, color: ORANGE, border: "1px solid " + ORANGE }}>
+                <RotateCcw size={16} />Repedir último pedido
+              </button>
+            )}
             {cats.map((u) => (
               <div key={u.id}>
                 <div className="flex items-center gap-2 mb-2"><Utensils size={16} color={ORANGE} /><h3 className="font-bold" style={{ color: NAVY }}>{u.name}</h3></div>
                 <div className="grid sm:grid-cols-2 gap-3">
                   {u.produtos.map((p) => (
-                    <button key={p.id} onClick={() => abrir(p, u.id)} className="text-left bg-white rounded-2xl border overflow-hidden hover:shadow-md transition flex" style={{ borderColor: "#ECECEC" }}>
+                    <button key={p.id} onClick={() => abrir(p, u.id)} disabled={p.esgotado} className={"text-left bg-white rounded-2xl border overflow-hidden transition flex relative " + (p.esgotado ? "opacity-70 cursor-not-allowed" : "hover:shadow-md")} style={{ borderColor: "#ECECEC" }}>
+                      {p.esgotado && <span className="absolute top-2 left-2 z-10 text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: "#C0392B", color: "#fff" }}>ESGOTADO</span>}
                       {p.imageUrl
-                        ? <img src={p.imageUrl} alt={p.name} className="w-24 h-24 shrink-0 object-cover" />
-                        : <div className="w-24 shrink-0 flex items-center justify-center" style={{ background: "linear-gradient(135deg," + catCor(u.id) + "," + catCor(u.id) + "bb)" }}><Utensils size={30} color="rgba(255,255,255,.92)" /></div>}
-                      <div className="p-3 flex-1"><div className="font-semibold text-sm" style={{ color: NAVY }}>{p.name}</div><div className="text-xs mt-0.5" style={{ color: "#9AA0A6" }}>{p.description || "Toque para escolher"}</div><div className="text-sm mt-1 font-bold" style={{ color: ORANGE }}>{money(Number(p.price))}</div></div>
+                        ? <img src={p.imageUrl} alt={p.name} className="w-24 h-24 shrink-0 object-cover" style={p.esgotado ? { filter: "grayscale(1)" } : undefined} />
+                        : <div className="w-24 shrink-0 flex items-center justify-center" style={{ background: "linear-gradient(135deg," + catCor(u.id) + "," + catCor(u.id) + "bb)", filter: p.esgotado ? "grayscale(1)" : undefined }}><Utensils size={30} color="rgba(255,255,255,.92)" /></div>}
+                      <div className="p-3 flex-1"><div className="font-semibold text-sm" style={{ color: NAVY }}>{p.name}</div><div className="text-xs mt-0.5" style={{ color: "#9AA0A6" }}>{p.esgotado ? "Indisponível no momento" : (p.description || "Toque para escolher")}</div><div className="text-sm mt-1 font-bold" style={{ color: ORANGE }}>{money(Number(p.price))}</div></div>
                     </button>
                   ))}
                 </div>
@@ -1954,7 +2024,11 @@ function ClienteApp({ onExit, toast }) {
                     <div className="flex items-center gap-2"><span className="text-sm font-semibold" style={{ color: NAVY }}>{money(itemTotal(x))}</span><button onClick={() => removeItem(x.key)} style={{ color: "#C0392B" }}><X size={14} /></button></div>
                   </div>
                 ))}
-                <div className="flex justify-between mt-3"><span className="font-bold" style={{ color: NAVY }}>Total</span><span className="font-bold text-lg" style={{ color: NAVY }}>{money(total)}</span></div>
+                <div className="mt-3 space-y-1 text-sm">
+                  <div className="flex justify-between"><span style={{ color: "#6B7280" }}>Subtotal</span><span style={{ color: NAVY }}>{money(total)}</span></div>
+                  {co.tipo === "entrega" && <div className="flex justify-between"><span style={{ color: "#6B7280" }}>Entrega{co.bairro ? " · " + co.bairro : ""}</span><span style={{ color: taxa === 0 ? "#2E7D32" : NAVY }}>{taxa === 0 ? "Grátis" : money(taxa)}</span></div>}
+                  <div className="flex justify-between pt-2 mt-1 border-t" style={{ borderColor: "#F2F2F2" }}><span className="font-bold" style={{ color: NAVY }}>Total</span><span className="font-bold text-lg" style={{ color: NAVY }}>{money(totalComTaxa)}</span></div>
+                </div>
               </Card>
               <Card className="p-5">
                 <h3 className="font-bold mb-3" style={{ color: NAVY }}>Seus dados</h3>
@@ -1984,7 +2058,7 @@ function ClienteApp({ onExit, toast }) {
                 <div className="grid grid-cols-2 gap-2">
                   {[["Pix", QrCode], ["Cartão na entrega", CreditCard], ["Dinheiro", Banknote], ["Usar Zips", Gift]].map(([l, I]) => <button key={l} onClick={() => setCo({ ...co, pagamento: l })} className="p-2.5 rounded-xl border inline-flex items-center gap-2 text-sm font-medium" style={co.pagamento === l ? { borderColor: ORANGE, background: SOFT, color: NAVY } : { borderColor: "#E2E2E2", color: NAVY }}><I size={15} color={ORANGE} />{l}</button>)}
                 </div>
-                <Btn className="w-full mt-4" icon={Check} onClick={finalizar}>Finalizar pedido · {money(total)}</Btn>
+                <Btn className="w-full mt-4" icon={Check} onClick={finalizar}>Finalizar pedido · {money(totalComTaxa)}</Btn>
               </Card>
             </div>
           )
@@ -2207,6 +2281,21 @@ function PedidosVivo({ toast }) {
   const toggle = () => { if (!sound) { unlockAudio(); beep(); setSound(true); } else setSound(false); };
   const ativos = orders.filter((o) => o.status !== "concluido" && o.status !== "entregue");
   const stInfo = { novo: ["Novo", "red"], aceito: ["Aceito", "blue"], producao: ["Em produção", "orange"], pronto: ["Pronto", "green"], coletado: ["Coletado", "navy"], entrega: ["Saiu p/ entrega", "blue"] };
+  const waCliente = (o) => {
+    const d = (o.telefone || "").replace(/\D/g, "");
+    if (!d) return toast("Esse pedido não tem telefone do cliente");
+    const full = d.startsWith("55") ? d : "55" + d;
+    const msgs = {
+      novo: "Recebemos seu pedido #" + o.numero + "! Já vamos confirmar.",
+      aceito: "Seu pedido #" + o.numero + " foi aceito e já vai para a produção.",
+      producao: "Seu pedido #" + o.numero + " já está sendo preparado.",
+      pronto: o.tipo === "delivery" ? "Seu pedido #" + o.numero + " está pronto e logo sai para entrega." : "Seu pedido #" + o.numero + " está pronto para retirada!",
+      coletado: "Seu pedido #" + o.numero + " saiu para entrega e está a caminho.",
+      entrega: "Seu pedido #" + o.numero + " saiu para entrega e está a caminho.",
+    };
+    const texto = (msgs[o.status] || ("Atualização do seu pedido #" + o.numero)) + " — Zipão";
+    window.open("https://wa.me/" + full + "?text=" + encodeURIComponent(texto), "_blank");
+  };
   return (
     <Section title="Pedidos ao vivo" desc="Aceite os pedidos que chegam e cobre a cozinha quando atrasar." right={<SoundBtn on={sound} onToggle={toggle} />}>
       <div className="space-y-2">
@@ -2225,6 +2314,7 @@ function PedidosVivo({ toast }) {
               <Pill tone={tone}>{t}</Pill>
               {o.status === "novo" && <Btn size="sm" icon={Check} onClick={() => { liveStore.update(o.id, { status: "aceito" }); toast("Pedido #" + o.numero + " aceito"); }}>Aceitar</Btn>}
               {(o.status === "aceito" || o.status === "producao") && <Btn size="sm" variant="ghost" icon={BellIcon} onClick={() => { liveStore.update(o.id, { urgent: true }); toast("Cozinha avisada sobre #" + o.numero); }}>Cobrar</Btn>}
+              {o.telefone && <Btn size="sm" variant="ghost" icon={MessageCircle} onClick={() => waCliente(o)}>Avisar</Btn>}
             </div>
           </Card>
         ); })}
@@ -2307,11 +2397,12 @@ const NAV = [
 
 function Admin({ onExit, startMod, operador }) {
   const [mod, setMod] = useState(startMod || "dashboard");
+  useEffect(() => { try { localStorage.setItem("zipao_admin_mod", mod); } catch (e) {} }, [mod]);
   const [open, setOpen] = useState(false);
   const [tour, setTour] = useState(null);
   const [toastMsg, setToastMsg] = useState(null);
   const toast = (m) => { setToastMsg(m); setTimeout(() => setToastMsg(null), 2600); };
-  const Active = NAV.find((n) => n.k === mod).C;
+  const Active = (NAV.find((n) => n.k === mod) || NAV[0]).C;
 
   const liveOrders = useLive();
   useAudioAutoUnlock();
@@ -2409,8 +2500,15 @@ export default function App() {
   const toast = (m) => { setToastMsg(m); setTimeout(() => setToastMsg(null), 2400); };
   const goAdmin = (mod, operador) => { setAdminInit({ mod: mod || "dashboard", operador: operador || null }); setScreen("admin"); };
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const direct = params.has("loja") || window.location.hash.replace("#", "") === "loja";
+    if (direct) { setScreen("cliente"); setBooting(false); return; }
     supabase.auth.getSession().then(({ data }) => {
-      if (data && data.session) { setAdminInit({ mod: "dashboard", operador: null }); setScreen("admin"); }
+      if (data && data.session) {
+        let saved = "dashboard";
+        try { saved = localStorage.getItem("zipao_admin_mod") || "dashboard"; } catch (e) {}
+        setAdminInit({ mod: saved, operador: null }); setScreen("admin");
+      }
       setBooting(false);
     }).catch(() => setBooting(false));
   }, []);
