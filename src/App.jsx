@@ -1516,6 +1516,85 @@ function Clientes({ toast }) {
   );
 }
 
+function ConfigLoja({ toast }) {
+  const dias = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+  const [minOrder, setMinOrder] = useState(0);
+  const [pausado, setPausado] = useState(false);
+  const [hoursEnabled, setHoursEnabled] = useState(false);
+  const [hours, setHours] = useState(dias.map(() => ({ aberto: true, abre: "08:00", fecha: "18:00" })));
+  const [loading, setLoading] = useState(true);
+  const [coupons, setCoupons] = useState([]);
+  const [cForm, setCForm] = useState({ code: "", type: "percent", value: "", min_subtotal: "" });
+  const load = async () => {
+    const { data } = await supabase.from("store_settings").select("*").eq("storeId", STORE_ID).maybeSingle();
+    if (data) {
+      setMinOrder(Number(data.minOrder) || 0);
+      setPausado(!!data.pedidosPausados);
+      setHoursEnabled(!!data.hoursEnabled);
+      if (Array.isArray(data.hours) && data.hours.length === 7) setHours(data.hours);
+    }
+    const rc = await supabase.from("store_coupons").select("*").eq("storeId", STORE_ID).order("createdAt", { ascending: false });
+    setCoupons(rc.data || []);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+  const salvar = async () => {
+    const { error } = await supabase.from("store_settings").upsert({ storeId: STORE_ID, minOrder: Number(minOrder) || 0, pedidosPausados: pausado, hoursEnabled, hours }, { onConflict: "storeId" });
+    if (error) return toast("Erro: " + error.message);
+    toast("Configurações da loja salvas");
+  };
+  const setDay = (i, patch) => setHours((h) => h.map((d, idx) => idx === i ? { ...d, ...patch } : d));
+  const addCupom = async () => {
+    if (!cForm.code.trim()) return toast("Informe o código do cupom");
+    const { error } = await supabase.from("store_coupons").insert({ storeId: STORE_ID, code: cForm.code.trim().toUpperCase(), type: cForm.type, value: Number(cForm.value) || 0, min_subtotal: Number(cForm.min_subtotal) || 0, active: true });
+    if (error) return toast("Erro: " + error.message);
+    setCForm({ code: "", type: "percent", value: "", min_subtotal: "" }); toast("Cupom criado"); load();
+  };
+  const toggleCupom = async (c) => { const { error } = await supabase.from("store_coupons").update({ active: !c.active }).eq("id", c.id); if (error) return toast("Erro: " + error.message); load(); };
+  const delCupom = async (c) => { const { error } = await supabase.from("store_coupons").delete().eq("id", c.id); if (error) return toast("Erro: " + error.message); load(); };
+  return (
+    <Section title="Loja" desc="Horário de funcionamento, pedido mínimo, pausa e cupons." right={<Btn icon={Check} onClick={salvar}>Salvar</Btn>}>
+      <div className="grid lg:grid-cols-2 gap-4">
+        <Card className="p-6">
+          <div className="flex items-center justify-between"><div className="flex items-center gap-2"><Power size={18} color={ORANGE} /><span className="font-bold" style={{ color: NAVY }}>Pausar pedidos agora</span></div><Toggle on={pausado} onChange={setPausado} /></div>
+          <p className="text-sm mt-2" style={{ color: "#6B7280" }}>Quando ligado, a loja mostra "fechada" e ninguém finaliza pedido — útil em dia cheio.</p>
+          <div className="mt-5"><label className="text-sm font-medium" style={{ color: NAVY }}>Pedido mínimo (R$)</label><input type="number" value={minOrder} onChange={(e) => setMinOrder(e.target.value)} className="w-full mt-1 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /><p className="text-xs mt-1" style={{ color: "#9AA0A6" }}>0 = sem mínimo.</p></div>
+        </Card>
+        <Card className="p-6">
+          <div className="flex items-center justify-between"><div className="flex items-center gap-2"><Clock size={18} color={ORANGE} /><span className="font-bold" style={{ color: NAVY }}>Usar horário de funcionamento</span></div><Toggle on={hoursEnabled} onChange={setHoursEnabled} /></div>
+          <p className="text-sm mt-2 mb-3" style={{ color: "#6B7280" }}>Fora do horário, a loja fecha sozinha. Desligado = sempre aberta.</p>
+          {hoursEnabled && hours.map((d, i) => (
+            <div key={i} className="flex items-center gap-2 py-1.5">
+              <div className="w-16 text-sm" style={{ color: NAVY }}>{dias[i].slice(0, 3)}</div>
+              <Toggle on={d.aberto} onChange={(v) => setDay(i, { aberto: v })} />
+              {d.aberto
+                ? <><input type="time" value={d.abre} onChange={(e) => setDay(i, { abre: e.target.value })} className="px-2 py-1 rounded-lg border text-sm" style={{ borderColor: "#E2E2E2" }} /><span className="text-sm" style={{ color: "#9AA0A6" }}>às</span><input type="time" value={d.fecha} onChange={(e) => setDay(i, { fecha: e.target.value })} className="px-2 py-1 rounded-lg border text-sm" style={{ borderColor: "#E2E2E2" }} /></>
+                : <span className="text-sm" style={{ color: "#9AA0A6" }}>Fechado</span>}
+            </div>
+          ))}
+        </Card>
+        <Card className="p-6 lg:col-span-2">
+          <h3 className="font-bold mb-1" style={{ color: NAVY }}>Cupons de desconto</h3>
+          <p className="text-sm mb-4" style={{ color: "#9AA0A6" }}>O cliente digita o código no checkout. Pode ser percentual (%) ou valor fixo (R$), com pedido mínimo opcional.</p>
+          {coupons.length === 0 && <p className="text-sm mb-2" style={{ color: "#9AA0A6" }}>Nenhum cupom ainda.</p>}
+          {coupons.map((c) => (
+            <div key={c.id} className="flex items-center justify-between py-2 border-b" style={{ borderColor: "#F2F2F2" }}>
+              <div><span className="font-bold text-sm" style={{ color: NAVY }}>{c.code}</span><span className="text-xs ml-2" style={{ color: "#6B7280" }}>{c.type === "percent" ? c.value + "%" : money(Number(c.value))}{Number(c.min_subtotal) > 0 ? " · mín " + money(Number(c.min_subtotal)) : ""}</span></div>
+              <div className="flex items-center gap-2"><span className="text-xs" style={{ color: c.active ? "#1B7F4B" : "#C0392B" }}>{c.active ? "Ativo" : "Inativo"}</span><Toggle on={c.active} onChange={() => toggleCupom(c)} /><button onClick={() => delCupom(c)} style={{ color: "#C0392B" }}><X size={14} /></button></div>
+            </div>
+          ))}
+          <div className="grid sm:grid-cols-4 gap-2 mt-3">
+            <input value={cForm.code} onChange={(e) => setCForm({ ...cForm, code: e.target.value })} placeholder="CÓDIGO" className="px-3 py-2.5 rounded-xl border text-sm outline-none uppercase" style={{ borderColor: "#E2E2E2" }} />
+            <select value={cForm.type} onChange={(e) => setCForm({ ...cForm, type: e.target.value })} className="px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }}><option value="percent">Percentual %</option><option value="fixed">Valor R$</option></select>
+            <input type="number" value={cForm.value} onChange={(e) => setCForm({ ...cForm, value: e.target.value })} placeholder="Valor" className="px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            <div className="flex gap-2"><input type="number" value={cForm.min_subtotal} onChange={(e) => setCForm({ ...cForm, min_subtotal: e.target.value })} placeholder="Mín R$" className="flex-1 px-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} /><Btn size="sm" icon={Plus} onClick={addCupom}>Add</Btn></div>
+          </div>
+        </Card>
+      </div>
+    </Section>
+  );
+}
+
 function Clube({ toast }) {
   const [ativo, setAtivo] = useState(true);
   const [pct, setPct] = useState(5);
@@ -1894,9 +1973,14 @@ function ClienteApp({ onExit, toast }) {
 
   const [cats, setCats] = useState([]);
   const [loadingMenu, setLoadingMenu] = useState(true);
-  const [cfg, setCfg] = useState({ deliveryFeeDefault: 0, freeAbove: 0 });
+  const [cfg, setCfg] = useState({ deliveryFeeDefault: 0, freeAbove: 0, minOrder: 0, hoursEnabled: false, hours: null, pedidosPausados: false });
   const [zones, setZones] = useState([]);
   const [lastOrder, setLastOrder] = useState(null);
+  const [busca, setBusca] = useState("");
+  const [topIds, setTopIds] = useState([]);
+  const [cupom, setCupom] = useState("");
+  const [cupomAplicado, setCupomAplicado] = useState(null);
+  const [aplicando, setAplicando] = useState(false);
   useEffect(() => {
     (async () => {
       const rc = await supabase.from("product_categories").select("*").eq("storeId", STORE_ID).order("order");
@@ -1910,9 +1994,11 @@ function ClienteApp({ onExit, toast }) {
       setCats(grouped);
       setLoadingMenu(false);
       const rs = await supabase.from("store_settings").select("*").eq("storeId", STORE_ID).maybeSingle();
-      if (rs.data) setCfg({ deliveryFeeDefault: Number(rs.data.deliveryFeeDefault) || 0, freeAbove: Number(rs.data.freeAbove) || 0 });
+      if (rs.data) setCfg({ deliveryFeeDefault: Number(rs.data.deliveryFeeDefault) || 0, freeAbove: Number(rs.data.freeAbove) || 0, minOrder: Number(rs.data.minOrder) || 0, hoursEnabled: !!rs.data.hoursEnabled, hours: rs.data.hours || null, pedidosPausados: !!rs.data.pedidosPausados });
       const rz = await supabase.from("delivery_zones").select("*").eq("storeId", STORE_ID);
       setZones(rz.data || []);
+      const rt = await supabase.from("top_products").select("*").order("qtd", { ascending: false }).limit(8);
+      setTopIds((rt.data || []).map((r) => r.product_id));
       try { const ls = localStorage.getItem("zipao_last_order"); if (ls) setLastOrder(JSON.parse(ls)); } catch (e) {}
     })();
   }, []);
@@ -1924,7 +2010,33 @@ function ClienteApp({ onExit, toast }) {
   const norm = (s) => (s || "").trim().toLowerCase();
   const zoneFee = () => { const z = zones.find((z) => norm(z.bairro) === norm(co.bairro)); return z ? Number(z.fee) : Number(cfg.deliveryFeeDefault) || 0; };
   const taxa = co.tipo === "entrega" ? ((cfg.freeAbove > 0 && total >= cfg.freeAbove) ? 0 : zoneFee()) : 0;
-  const totalComTaxa = total + taxa;
+  const desconto = cupomAplicado ? Math.min(Number(cupomAplicado.discount) || 0, total) : 0;
+  const totalComTaxa = Math.max(0, total - desconto) + taxa;
+  useEffect(() => { setCupomAplicado(null); }, [total]);
+  const lojaStatus = (() => {
+    if (cfg.pedidosPausados) return { aberta: false, msg: "Estamos com os pedidos pausados no momento." };
+    if (!cfg.hoursEnabled || !Array.isArray(cfg.hours)) return { aberta: true, msg: "" };
+    const now = new Date(); const h = cfg.hours[now.getDay()];
+    if (!h || !h.aberto) return { aberta: false, msg: "Fechada hoje." };
+    const toMin = (s) => { const p = String(s || "").split(":").map(Number); return (p[0] || 0) * 60 + (p[1] || 0); };
+    const cur = now.getHours() * 60 + now.getMinutes();
+    if (cur < toMin(h.abre)) return { aberta: false, msg: "Abre hoje às " + h.abre + "." };
+    if (cur >= toMin(h.fecha)) return { aberta: false, msg: "Fechada — atendemos hoje até " + h.fecha + "." };
+    return { aberta: true, msg: "" };
+  })();
+  const aberta = lojaStatus.aberta;
+  const catsFiltradas = busca.trim() ? cats.map((c) => ({ ...c, produtos: c.produtos.filter((p) => norm(p.name).includes(norm(busca))) })).filter((c) => c.produtos.length) : cats;
+  const topProds = busca.trim() ? [] : topIds.map((id) => { for (const c of cats) { const p = c.produtos.find((x) => x.id === id); if (p) return p; } return null; }).filter((p) => p && !p.esgotado).slice(0, 6);
+  const aplicarCupom = async () => {
+    if (!cupom.trim()) return;
+    setAplicando(true);
+    const { data, error } = await supabase.rpc("apply_coupon", { p_code: cupom.trim(), p_subtotal: total, p_store: STORE_ID });
+    setAplicando(false);
+    if (error) return toast("Não foi possível validar o cupom");
+    if (!data || !data.valid) { setCupomAplicado(null); return toast((data && data.reason) || "Cupom inválido"); }
+    setCupomAplicado({ code: data.code, discount: Number(data.discount) || 0 });
+    toast("Cupom " + data.code + " aplicado");
+  };
 
   const abrir = (p, catId) => { if (p.esgotado) return toast("Produto esgotado no momento"); setSel({ p, catId }); setQty(1); setObs(""); setExtras([]); };
   const addCart = () => { setCart((c) => [...c, { key: Date.now(), productId: sel.p.id, n: sel.p.name, p: Number(sel.p.price), catId: sel.catId, q: qty, obs, extras }]); toast(qty + "× " + sel.p.name + " no carrinho"); setSel(null); };
@@ -1939,10 +2051,13 @@ function ClienteApp({ onExit, toast }) {
   const buscarCep = async (cep) => { const c = (cep || "").replace(/\D/g, ""); if (c.length !== 8) return; try { const r = await fetch("https://viacep.com.br/ws/" + c + "/json/"); const d = await r.json(); if (!d.erro) setCo((s) => ({ ...s, rua: d.logradouro || "", bairro: d.bairro || "", cidade: d.localidade || "", uf: d.uf || "" })); } catch (e) {} };
   const finalizar = async () => {
     if (cart.length === 0) return toast("Carrinho vazio");
+    if (!aberta) return toast(lojaStatus.msg || "Loja fechada no momento");
+    if (cfg.minOrder > 0 && total < cfg.minOrder) return toast("Pedido mínimo de " + money(cfg.minOrder));
     if (!co.nome || !co.tel) return toast("Informe nome e telefone");
     if (co.tipo === "entrega" && !co.cep) return toast("Informe o endereço de entrega");
     const endereco = co.tipo === "entrega" ? (co.rua + ", " + co.num + (co.comp ? " - " + co.comp : "") + " - " + co.bairro + ", " + co.cidade + "/" + co.uf) : "Retirada na loja";
     const itens = cart.map((x) => ({ productId: x.productId, nome: x.n, qtd: x.q, preco: x.p, extras: x.extras.map((e) => e.n), obs: x.obs }));
+    if (desconto > 0 && cupomAplicado) itens.push({ nome: "Desconto (" + cupomAplicado.code + ")", qtd: 1, preco: -desconto });
     if (taxa > 0) itens.push({ nome: "Taxa de entrega", qtd: 1, preco: taxa });
     const { data, error } = await supabase.from("pedidos").insert({ storeId: STORE_ID, tipo: co.tipo, cliente: co.nome, telefone: co.tel, endereco, itens, total: totalComTaxa, pagamento: co.pagamento, status: "novo" }).select("id").single();
     if (error) return toast("Erro: " + error.message);
@@ -1980,17 +2095,38 @@ function ClienteApp({ onExit, toast }) {
           {tabs.map(([k, l, I]) => <button key={k} onClick={() => setTab(k)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold inline-flex items-center justify-center gap-2 relative" style={tab === k ? { background: ORANGE, color: "#fff" } : { background: "#fff", color: NAVY, border: "1px solid #E8E8E8" }}><I size={16} />{l}{k === "pedido" && count > 0 && <span className="absolute -top-1 -right-1 h-5 min-w-5 px-1 rounded-full text-xs font-bold flex items-center justify-center" style={{ background: NAVY, color: "#fff" }}>{count}</span>}</button>)}
         </div>
 
+        {!aberta && <div className="mb-4 rounded-xl p-3 text-sm font-medium flex items-center gap-2" style={{ background: "#FBEAEA", color: "#9B2C2C" }}><Clock size={16} />{lojaStatus.msg || "Loja fechada no momento."} Você pode montar o pedido, mas o envio fica disponível quando reabrirmos.</div>}
+
         {tab === "cardapio" && (
           loadingMenu ? <Card className="p-8 text-center"><span className="text-sm" style={{ color: "#9AA0A6" }}>Carregando cardápio...</span></Card>
           : cats.length === 0 ? <Card className="p-8 text-center"><span className="text-sm" style={{ color: "#9AA0A6" }}>O cardápio ainda não tem produtos. O dono cadastra em "Cardápio" no painel.</span></Card>
           : (
-          <div className="space-y-6">
-            {lastOrder && lastOrder.length > 0 && (
+          <div className="space-y-5">
+            <div className="relative">
+              <Search size={16} color="#9AA0A6" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+              <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar no cardápio..." className="w-full pl-9 pr-3 py-2.5 rounded-xl border text-sm outline-none" style={{ borderColor: "#E2E2E2" }} />
+            </div>
+            {lastOrder && lastOrder.length > 0 && !busca.trim() && (
               <button onClick={repedir} className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm" style={{ background: SOFT, color: ORANGE, border: "1px solid " + ORANGE }}>
                 <RotateCcw size={16} />Repedir último pedido
               </button>
             )}
-            {cats.map((u) => (
+            {topProds.length >= 2 && (
+              <div>
+                <div className="flex items-center gap-2 mb-2"><Flame size={16} color={ORANGE} /><h3 className="font-bold" style={{ color: NAVY }}>Mais pedidos</h3></div>
+                <div className="flex gap-3 overflow-x-auto pb-1">
+                  {topProds.map((p) => (
+                    <button key={p.id} onClick={() => abrir(p, p.categoryId)} className="shrink-0 w-32 text-left bg-white rounded-2xl border overflow-hidden hover:shadow-md transition" style={{ borderColor: "#ECECEC" }}>
+                      {p.imageUrl ? <img src={p.imageUrl} alt={p.name} className="w-full h-20 object-cover" /> : <div className="w-full h-20 flex items-center justify-center" style={{ background: "linear-gradient(135deg," + catCor(p.categoryId) + "," + catCor(p.categoryId) + "bb)" }}><Utensils size={24} color="rgba(255,255,255,.92)" /></div>}
+                      <div className="p-2"><div className="font-semibold text-xs leading-tight" style={{ color: NAVY }}>{p.name}</div><div className="text-xs mt-0.5 font-bold" style={{ color: ORANGE }}>{money(Number(p.price))}</div></div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {catsFiltradas.length === 0
+              ? <Card className="p-6 text-center"><span className="text-sm" style={{ color: "#9AA0A6" }}>Nada encontrado para "{busca}".</span></Card>
+              : catsFiltradas.map((u) => (
               <div key={u.id}>
                 <div className="flex items-center gap-2 mb-2"><Utensils size={16} color={ORANGE} /><h3 className="font-bold" style={{ color: NAVY }}>{u.name}</h3></div>
                 <div className="grid sm:grid-cols-2 gap-3">
@@ -2024,10 +2160,18 @@ function ClienteApp({ onExit, toast }) {
                     <div className="flex items-center gap-2"><span className="text-sm font-semibold" style={{ color: NAVY }}>{money(itemTotal(x))}</span><button onClick={() => removeItem(x.key)} style={{ color: "#C0392B" }}><X size={14} /></button></div>
                   </div>
                 ))}
+                <div className="mt-3 flex gap-2">
+                  <input value={cupom} onChange={(e) => setCupom(e.target.value)} placeholder="Cupom de desconto" className="flex-1 px-3 py-2 rounded-xl border text-sm outline-none uppercase" style={{ borderColor: "#E2E2E2" }} />
+                  {cupomAplicado
+                    ? <Btn size="sm" variant="ghost" onClick={() => { setCupomAplicado(null); setCupom(""); }}>Remover</Btn>
+                    : <Btn size="sm" variant="ghost" onClick={aplicarCupom}>{aplicando ? "..." : "Aplicar"}</Btn>}
+                </div>
                 <div className="mt-3 space-y-1 text-sm">
                   <div className="flex justify-between"><span style={{ color: "#6B7280" }}>Subtotal</span><span style={{ color: NAVY }}>{money(total)}</span></div>
+                  {desconto > 0 && <div className="flex justify-between"><span style={{ color: "#2E7D32" }}>Desconto{cupomAplicado ? " · " + cupomAplicado.code : ""}</span><span style={{ color: "#2E7D32" }}>− {money(desconto)}</span></div>}
                   {co.tipo === "entrega" && <div className="flex justify-between"><span style={{ color: "#6B7280" }}>Entrega{co.bairro ? " · " + co.bairro : ""}</span><span style={{ color: taxa === 0 ? "#2E7D32" : NAVY }}>{taxa === 0 ? "Grátis" : money(taxa)}</span></div>}
                   <div className="flex justify-between pt-2 mt-1 border-t" style={{ borderColor: "#F2F2F2" }}><span className="font-bold" style={{ color: NAVY }}>Total</span><span className="font-bold text-lg" style={{ color: NAVY }}>{money(totalComTaxa)}</span></div>
+                  {cfg.minOrder > 0 && total < cfg.minOrder && <div className="text-xs pt-1" style={{ color: "#C0392B" }}>Faltam {money(cfg.minOrder - total)} para o pedido mínimo de {money(cfg.minOrder)}.</div>}
                 </div>
               </Card>
               <Card className="p-5">
@@ -2058,7 +2202,11 @@ function ClienteApp({ onExit, toast }) {
                 <div className="grid grid-cols-2 gap-2">
                   {[["Pix", QrCode], ["Cartão na entrega", CreditCard], ["Dinheiro", Banknote], ["Usar Zips", Gift]].map(([l, I]) => <button key={l} onClick={() => setCo({ ...co, pagamento: l })} className="p-2.5 rounded-xl border inline-flex items-center gap-2 text-sm font-medium" style={co.pagamento === l ? { borderColor: ORANGE, background: SOFT, color: NAVY } : { borderColor: "#E2E2E2", color: NAVY }}><I size={15} color={ORANGE} />{l}</button>)}
                 </div>
-                <Btn className="w-full mt-4" icon={Check} onClick={finalizar}>Finalizar pedido · {money(totalComTaxa)}</Btn>
+                {(() => {
+                  const bloqueado = !aberta || (cfg.minOrder > 0 && total < cfg.minOrder);
+                  if (bloqueado) return <button disabled className="w-full mt-4 rounded-xl font-semibold px-4 py-2.5 inline-flex items-center justify-center gap-2 cursor-not-allowed" style={{ background: "#E5E7EB", color: "#9AA0A6" }}>{!aberta ? "Loja fechada no momento" : "Pedido mínimo de " + money(cfg.minOrder)}</button>;
+                  return <Btn className="w-full mt-4" icon={Check} onClick={finalizar}>Finalizar pedido · {money(totalComTaxa)}</Btn>;
+                })()}
               </Card>
             </div>
           )
@@ -2386,6 +2534,7 @@ const NAV = [
   { k: "fiscal", label: "Fiscal & impressora", icon: Printer, C: Fiscal },
   { k: "encomendas", label: "Encomendas", icon: Calendar, C: Encomendas },
   { k: "delivery", label: "Delivery", icon: Truck, C: Delivery },
+  { k: "loja", label: "Loja (horário, cupons)", icon: Store, C: ConfigLoja },
   { k: "clientes", label: "Clientes & cashback", icon: Users, C: Clientes },
   { k: "clube", label: "Clube de pontos", icon: Gift, C: Clube },
   { k: "pagamentos", label: "Pagamentos & PDVs", icon: Wallet, C: Pagamentos },
